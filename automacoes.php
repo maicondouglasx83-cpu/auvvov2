@@ -70,7 +70,8 @@ foreach ($stagesByPipeline as $pid => $map) {
 
 <link rel="stylesheet" href="app.css">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/drawflow@0.0.60/dist/drawflow.min.css">
-<link rel="stylesheet" href="assets/automacoes-flow.css?v=20260520v">
+<link rel="stylesheet" href="assets/automacoes-flow.css?v=20260524c">
+<link rel="stylesheet" href="assets/automacoes-lab.css?v=20260524c">
 
 <script src="https://unpkg.com/@phosphor-icons/web"></script>
 <script src="https://cdn.jsdelivr.net/npm/drawflow@0.0.60/dist/drawflow.min.js"></script>
@@ -108,22 +109,10 @@ foreach ($stagesByPipeline as $pid => $map) {
 .queue-stats{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:20px}
 .queue-stat{padding:12px 16px;border-radius:10px;background:#fff;border:1px solid var(--border-subtle);font-size:.8125rem}
 .queue-stat strong{display:block;font-size:1.25rem;color:var(--text-primary)}
-.wa-connect-grid{display:grid;grid-template-columns:280px 1fr;gap:24px;align-items:start}
-@media(max-width:768px){.wa-connect-grid{grid-template-columns:1fr}}
-.wa-conn-list{display:flex;flex-direction:column;gap:8px;margin-top:12px;max-height:280px;overflow-y:auto}
-.wa-conn-item{padding:0;border:1px solid var(--border-subtle);border-radius:10px;background:#fff;display:flex;align-items:center;justify-content:space-between;gap:4px;overflow:hidden}
-.wa-conn-item.active{border-color:var(--accent-teal);background:#F0FDFA}
-.wa-conn-select{flex:1;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 12px;border:0;background:transparent;cursor:pointer;text-align:left;font:inherit}
-.wa-conn-actions{display:flex;gap:2px;padding-right:4px}
-.wa-conn-btn{border:0;background:transparent;color:var(--text-muted);cursor:pointer;padding:6px 8px;border-radius:8px;font-size:.875rem}
-.wa-conn-btn:hover{background:#F3F4F6;color:#EF4444}
-.wa-conn-rename:hover{color:var(--accent-teal)}
-.wa-conn-item .wa-conn-name{font-weight:600;font-size:.875rem}
-.wa-conn-badge{font-size:.65rem;font-weight:700;padding:2px 8px;border-radius:99px}
-.wa-conn-badge.online{background:#DCFCE7;color:#166534}
-.wa-conn-badge.waiting{background:#FEF3C7;color:#92400E}
-.wa-conn-badge.offline{background:#F3F4F6;color:#6B7280}
-.wa-qr-wrap{text-align:center;padding:24px;background:rgba(0,0,0,.02);border:2px dashed var(--border-subtle);border-radius:12px;min-height:200px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px}
+.auto-wa-banner{display:flex;align-items:center;gap:16px;padding:16px 20px;margin-bottom:20px;background:linear-gradient(135deg,#ecfdf5,#fff);border:1px solid #99f6e4;border-radius:14px;flex-wrap:wrap}
+.auto-wa-banner i{font-size:2rem;color:#25D366}
+.auto-wa-banner p{margin:4px 0 0;font-size:.8125rem;color:var(--text-muted)}
+.auto-wa-banner .btn{margin-left:auto}
 
 </style>
 
@@ -142,92 +131,50 @@ foreach ($stagesByPipeline as $pid => $map) {
     <div>
 
       <h1 class="page-title">Automações</h1>
-      <p class="page-hint">Configure o <strong>cérebro</strong> em <a href="agentes">Agentes</a>. Aqui você conecta o <strong>WhatsApp</strong>, define gatilhos (primeira mensagem, estágio, tag) e ações fixas. Integrações OAuth em <a href="integracoes">Integrações</a>.</p>
+      <p class="page-hint">Gatilhos (WhatsApp, estágio, tag) e ações nos fluxos. Configure o <strong>cérebro</strong> em <a href="agentes">Agentes</a> e as <strong>linhas WhatsApp</strong> em <a href="conexoes">Conexões</a>.</p>
     </div>
     <div class="page-header-actions">
-      <a href="integracoes" class="btn btn-secondary"><i class="ph-bold ph-plugs-connected"></i> Integrações</a>
-      <a href="webhooks" class="btn btn-outline">Webhooks</a>
+      <a href="conexoes" class="btn btn-secondary"><i class="ph-bold ph-whatsapp-logo"></i> Conexões</a>
+      <a href="integracoes" class="btn btn-outline"><i class="ph-bold ph-plugs-connected"></i> Integrações</a>
     </div>
   </div>
+
+  <?php if (empty($whatsapp_connections)): ?>
+  <div class="auto-wa-banner">
+    <i class="ph-bold ph-whatsapp-logo"></i>
+    <div>
+      <strong>Nenhuma linha WhatsApp conectada</strong>
+      <p>Crie uma conexão nomeada antes de usar gatilhos de mensagem.</p>
+    </div>
+    <a href="conexoes" class="btn btn-primary">Conectar WhatsApp</a>
+  </div>
+  <?php endif; ?>
 
   <div id="queue-stats" class="queue-stats"></div>
   <div id="dedupe-warn-global"></div>
 
+  <div class="auto-main-tabs">
+    <button type="button" class="auto-main-tab active" id="tab-build" onclick="setAutomacoesMainTab('build')"><i class="ph-bold ph-tree-structure"></i> Construir</button>
+    <button type="button" class="auto-main-tab" id="tab-test" onclick="setAutomacoesMainTab('test')"><i class="ph-bold ph-chat-circle-dots"></i> Testar</button>
+    <button type="button" class="auto-main-tab" id="tab-runs" onclick="setAutomacoesMainTab('runs')"><i class="ph-bold ph-list-checks"></i> Execuções</button>
+  </div>
+
+  <div id="panel-build">
   <div class="page-tabs-flow">
-    <button type="button" class="page-tab-flow active" id="tab-connections" onclick="setAutomacoesPageTab('connections')">Conexões WhatsApp</button>
-    <button type="button" class="page-tab-flow" id="tab-visual" onclick="setAutomacoesPageTab('visual')">Editor visual</button>
-    <button type="button" class="page-tab-flow" id="tab-quick" onclick="setAutomacoesPageTab('quick')">Regras simples</button>
+    <button type="button" class="page-tab-flow active" id="tab-visual" onclick="setAutomacoesPageTab('visual')">Editor visual</button>
+    <button type="button" class="page-tab-flow page-tab-flow--legacy" id="tab-quick" onclick="setAutomacoesPageTab('quick')" title="Modo legado — prefira o editor visual">Regras legado</button>
   </div>
 
-  <div id="panel-connections">
-    <div class="app-card">
-      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:16px">
-        <div>
-          <h2 style="font-size:1.125rem;margin:0 0 6px;display:flex;align-items:center;gap:8px"><i class="ph-bold ph-whatsapp-logo" style="color:#25D366"></i> Conexões WhatsApp</h2>
-          <p class="text-muted" style="font-size:.8125rem;margin:0;max-width:640px">Crie linhas com <strong>nome próprio</strong> (ex: Vendas, Suporte). Vários agentes podem usar a mesma conexão nas automações.</p>
-        </div>
-      </div>
-      <input type="hidden" id="csrf-token" value="<?= htmlspecialchars(csrf_token()) ?>">
-      <div class="wa-connect-grid">
-        <div>
-          <label class="form-label">Nova conexão</label>
-          <div style="display:flex;gap:8px;margin-bottom:12px">
-            <input type="text" id="wa-new-name" class="form-control" placeholder="Ex: Vendas, Suporte, Principal…" maxlength="120">
-            <button type="button" class="btn btn-primary" id="btn-wa-create" style="white-space:nowrap"><i class="ph-bold ph-plus"></i> Criar</button>
-          </div>
-          <label class="form-label">Agente padrão (cérebro)</label>
-          <select id="wa-default-agent" class="form-control" style="margin-bottom:12px">
-            <option value="">— Nenhum (definir nas automações) —</option>
-            <?php foreach ($agents as $ag): ?>
-            <option value="<?= (int) $ag['id'] ?>"><?= htmlspecialchars($ag['name']) ?></option>
-            <?php endforeach; ?>
-          </select>
-          <label class="form-label">Suas conexões</label>
-          <div id="wa-conn-list" class="wa-conn-list">
-            <?php if (empty($whatsapp_connections)): ?>
-            <p class="text-muted" style="font-size:.8125rem;padding:8px 0">Nenhuma conexão ainda. Crie uma acima.</p>
-            <?php else: foreach ($whatsapp_connections as $wc):
-              $st = (string) ($wc['status'] ?? 'offline');
-              $badgeClass = $st === 'online' ? 'online' : ($st === 'waiting_qr' ? 'waiting' : 'offline');
-              $badgeLabel = $st === 'online' ? 'Conectado' : ($st === 'waiting_qr' ? 'Aguardando QR' : 'Desconectado');
-            ?>
-            <div class="wa-conn-item" data-conn-id="<?= (int) $wc['id'] ?>" onclick="selectWaConnection(<?= (int) $wc['id'] ?>)">
-              <span class="wa-conn-name"><?= htmlspecialchars($wc['name']) ?></span>
-              <span class="wa-conn-badge <?= $badgeClass ?>"><?= $badgeLabel ?></span>
-            </div>
-            <?php endforeach; endif; ?>
-          </div>
-          <input type="hidden" id="wa-connection-select" value="<?= !empty($whatsapp_connections) ? (int) $whatsapp_connections[0]['id'] : 0 ?>">
-        </div>
-        <div>
-          <div id="evo-qr-box" class="wa-qr-wrap">
-            <i class="ph-bold ph-qr-code" style="font-size:3rem;color:var(--border-subtle)"></i>
-          </div>
-          <div id="evo-status" style="font-size:.9375rem;font-weight:600;text-align:center;margin:12px 0 8px">Selecione ou crie uma conexão</div>
-          <div id="evo-actions" style="text-align:center"></div>
-          <div id="evo-conn-edit" style="display:none;margin-top:20px;padding-top:16px;border-top:1px solid var(--border-subtle)">
-            <label class="form-label">Nome da conexão</label>
-            <input type="text" id="evo-conn-name" class="form-control" maxlength="120" style="margin-bottom:10px">
-            <label class="form-label">Agente padrão (cérebro)</label>
-            <select id="evo-conn-default-agent" class="form-control" style="margin-bottom:12px">
-              <option value="">— Nenhum —</option>
-              <?php foreach ($agents as $ag): ?>
-              <option value="<?= (int) $ag['id'] ?>"><?= htmlspecialchars($ag['name']) ?></option>
-              <?php endforeach; ?>
-            </select>
-            <button type="button" class="btn btn-secondary" id="btn-evo-save-conn" style="width:100%;font-size:.8125rem"><i class="ph-bold ph-floppy-disk"></i> Salvar conexão</button>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <div id="panel-visual" style="display:none">
+  <div id="panel-visual">
     <div class="flow-app">
       <aside class="flow-sidebar">
         <div class="flow-sidebar-head">
           <h3>Seus fluxos</h3>
-          <button type="button" class="btn btn-primary" style="width:100%;font-size:.8125rem;margin-bottom:8px" id="btn-new-flow"><i class="ph-bold ph-squares-four"></i> Fluxo avulso</button>
+          <button type="button" class="btn btn-primary" style="width:100%;font-size:.8125rem;margin-bottom:6px" id="btn-new-flow"><i class="ph-bold ph-plus"></i> Novo fluxo</button>
+          <div class="flow-sidebar-subbtns">
+            <button type="button" class="btn btn-outline" style="font-size:.75rem" id="btn-new-flow-blank">Em branco</button>
+            <button type="button" class="btn btn-outline" style="font-size:.75rem" id="btn-flow-journey">Jornada WA</button>
+          </div>
           <button type="button" class="btn btn-secondary" style="width:100%;font-size:.8125rem" id="btn-pack-templates"><i class="ph-bold ph-package"></i> Pacote completo (agentes + fluxos)</button>
           <span class="btn-template-hint">Pacotes criam vários agentes para testar handoff, memória e sessão.</span>
         </div>
@@ -238,29 +185,58 @@ foreach ($stagesByPipeline as $pid => $map) {
         <header class="flow-toolbar">
           <input type="text" id="flow-name" class="form-control flow-name-input" value="Nova automação" placeholder="Nome do fluxo">
           <select id="flow-pipeline" class="form-control flow-pipeline-select" title="Funil deste fluxo — gatilhos de estágio usam colunas deste pipeline"></select>
-          <label class="flow-toggle"><input type="checkbox" id="flow-active"> Publicar (ativo)</label>
+          <label class="flow-toggle" title="Use o botão Publicar para ativar"><input type="checkbox" id="flow-active" disabled> Publicado</label>
+          <p id="flow-publish-hint" class="flow-publish-hint">Rascunho — salve e publique quando estiver pronto</p>
           <div class="flow-toolbar-actions">
+            <button type="button" class="btn btn-outline" id="btn-test-before-publish" style="font-size:.8125rem" title="Abrir simulador"><i class="ph-bold ph-chat-circle-dots"></i></button>
+            <button type="button" class="btn btn-outline" id="btn-playground-toggle" style="font-size:.8125rem" title="Playground"><i class="ph-bold ph-sidebar-simple"></i></button>
             <div class="flow-zoom">
               <button type="button" id="zoom-out" title="Diminuir">−</button>
               <button type="button" id="zoom-reset" title="Reset">◎</button>
               <button type="button" id="zoom-in" title="Aumentar">+</button>
             </div>
             <button type="button" class="btn btn-outline" id="btn-flow-delete" style="font-size:.8125rem">Excluir</button>
-            <button type="button" class="btn btn-primary" id="btn-flow-save"><span id="btn-flow-saved">Salvar</span></button>
+            <button type="button" class="btn btn-outline" id="btn-flow-save" style="font-size:.8125rem"><span id="btn-flow-saved">Salvar rascunho</span></button>
+            <button type="button" class="btn btn-primary" id="btn-flow-publish" style="font-size:.8125rem"><i class="ph-bold ph-rocket-launch"></i> Publicar</button>
           </div>
         </header>
+        <div id="flow-routing-bar" class="flow-routing-bar">
+          <div class="flow-routing-bar__head">
+            <i class="ph-bold ph-path"></i>
+            <strong>Roteamento</strong>
+            <span class="text-muted">Funil, linhas WhatsApp e destino CRM</span>
+          </div>
+          <div id="flow-routing-summary" class="flow-routing-summary"></div>
+        </div>
         <div class="drawflow-wrap">
           <div id="drawflow"></div>
           <div class="flow-palette">
             <button type="button" class="flow-palette-btn" data-add-node="flow_trigger"><i class="ph-bold ph-play-circle"></i> Início</button>
-            <button type="button" class="flow-palette-btn" data-add-node="flow_condition"><i class="ph-bold ph-funnel"></i> Condição</button>
-            <button type="button" class="flow-palette-btn" data-add-node="flow_randomizer"><i class="ph-bold ph-shuffle"></i> Random</button>
-            <button type="button" class="flow-palette-btn" data-add-node="flow_action"><i class="ph-bold ph-lightning"></i> Ação</button>
-            <button type="button" class="flow-palette-btn" data-add-node="flow_delay"><i class="ph-bold ph-clock"></i> Espera</button>
+            <button type="button" class="flow-palette-btn" data-add-node="flow_condition"><i class="ph-bold ph-funnel"></i> Se</button>
+            <button type="button" class="flow-palette-btn flow-palette-btn--agent" data-add-node="flow_agent"><i class="ph-bold ph-robot"></i> Agente IA</button>
             <button type="button" class="flow-palette-btn" data-add-node="flow_message"><i class="ph-bold ph-whatsapp-logo"></i> Mensagem</button>
-            <button type="button" class="flow-palette-btn" data-add-node="flow_memory"><i class="ph-bold ph-brain"></i> Memória</button>
+            <button type="button" class="flow-palette-btn" data-add-node="flow_action" data-add-preset='{"action_type":"move_stage","stage":"new","pipeline_id":0,"label":"Mover estágio CRM"}'><i class="ph-bold ph-columns"></i> Mover estágio</button>
+            <button type="button" class="flow-palette-btn" data-add-node="flow_action" data-add-preset='{"action_type":"add_tag","tag":"novo-lead","label":"Adicionar tag"}'><i class="ph-bold ph-tag"></i> Tag CRM</button>
+            <button type="button" class="flow-palette-btn" data-add-node="flow_wait_reply"><i class="ph-bold ph-chat-teardrop-dots"></i> Aguardar resposta</button>
+            <button type="button" class="flow-palette-btn" data-add-node="flow_delay"><i class="ph-bold ph-clock"></i> Esperar tempo</button>
+            <button type="button" class="flow-palette-btn" data-add-node="flow_action" data-add-preset='{"action_type":"http_preset","label":"HTTP integração"}'><i class="ph-bold ph-plugs-connected"></i> Integração</button>
+            <button type="button" class="flow-palette-btn flow-palette-btn--more" id="btn-palette-more" title="Blocos avançados"><i class="ph-bold ph-dots-three"></i> Mais</button>
+          </div>
+          <div class="flow-palette flow-palette--extra" id="flow-palette-extra" hidden>
+            <button type="button" class="flow-palette-btn" data-add-node="flow_randomizer"><i class="ph-bold ph-shuffle"></i> Random A/B</button>
+            <button type="button" class="flow-palette-btn" data-add-node="flow_memory"><i class="ph-bold ph-brain"></i> Memória IA</button>
+            <button type="button" class="flow-palette-btn" data-add-node="flow_action"><i class="ph-bold ph-lightning"></i> Ação avançada</button>
           </div>
         </div>
+        <aside class="flow-playground" id="flow-playground">
+          <header><h4>Playground</h4><p class="text-muted">Teste rápido sem trocar de aba</p></header>
+          <div id="pg-chat-messages" class="sim-chat-messages" style="min-height:180px;max-height:240px"></div>
+          <div class="sim-chat-input">
+            <textarea id="pg-message" class="form-control" rows="2" placeholder="Mensagem de teste…"></textarea>
+            <button type="button" class="btn btn-primary" id="pg-send">Enviar</button>
+          </div>
+          <label style="font-size:.7rem;margin-top:6px;display:block"><input type="checkbox" id="pg-use-llm"> IA real</label>
+        </aside>
       </section>
       <aside class="flow-props" id="flow-props">
         <div class="flow-props-head">
@@ -328,6 +304,10 @@ foreach ($stagesByPipeline as $pid => $map) {
   </div>
 
   <div id="panel-quick-rules" style="display:none">
+  <div class="basic-box" style="margin-bottom:16px">
+    <strong>Modo legado</strong>
+    <p style="margin:6px 0 0;color:var(--text-muted)">Use o <strong>Editor visual</strong> para fluxos com Agente IA, simulador e log de execuções. Estas regras simples continuam funcionando, mas não recebem novos recursos.</p>
+  </div>
   <div class="auto-grid">
 
     <div>
@@ -713,6 +693,129 @@ foreach ($stagesByPipeline as $pid => $map) {
 
   </div>
   </div><!-- panel-quick-rules -->
+  </div><!-- panel-build -->
+
+  <div id="flow-publish-modal" class="flow-modal" hidden aria-hidden="true">
+    <div class="flow-modal-backdrop"></div>
+    <div class="flow-modal-panel" role="dialog">
+      <header class="flow-modal-header">
+        <div><h2>Publicar fluxo</h2><p>Revise antes de ativar no WhatsApp real.</p></div>
+      </header>
+      <div class="flow-modal-body" id="flow-publish-checklist"></div>
+      <footer class="pack-confirm-footer">
+        <button type="button" class="btn btn-outline" id="flow-publish-cancel">Cancelar</button>
+        <button type="button" class="btn btn-primary" id="flow-publish-confirm">Publicar agora</button>
+      </footer>
+    </div>
+  </div>
+
+  <div id="flow-wizard-modal" class="flow-modal" hidden aria-hidden="true">
+    <div class="flow-modal-backdrop"></div>
+    <div class="flow-modal-panel" role="dialog">
+      <header class="flow-modal-header">
+        <div><h2>Primeiro fluxo</h2><p>Escolha como começar — você pode testar antes de publicar.</p></div>
+      </header>
+      <div class="flow-modal-body flow-wizard-body">
+        <button type="button" class="btn btn-primary" id="wizard-use-journey" style="width:100%;margin-bottom:8px"><i class="ph-bold ph-robot"></i> Jornada WhatsApp (IA + aguardar resposta)</button>
+        <button type="button" class="btn btn-secondary" id="wizard-use-template" style="width:100%;margin-bottom:8px"><i class="ph-bold ph-copy"></i> Escolher template</button>
+        <button type="button" class="btn btn-outline" id="wizard-skip" style="width:100%">Pular</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="panel-test" style="display:none">
+    <p class="page-hint" style="margin-bottom:16px">Simule mensagens sem enviar WhatsApp nem alterar o CRM. Funciona com fluxos <strong>salvos</strong> ou com o canvas atual (marque «Usar editor»).</p>
+    <div class="sim-layout">
+      <aside class="sim-panel">
+        <h3>Cenário</h3>
+        <div class="sim-field">
+          <label>Fluxo</label>
+          <select id="sim-flow-id" class="form-control"></select>
+        </div>
+        <div class="sim-field">
+          <label><input type="checkbox" id="sim-use-editor" checked> Usar fluxo do editor (mesmo não salvo)</label>
+        </div>
+        <div class="sim-field">
+          <label><input type="checkbox" id="sim-use-llm"> Usar IA real (preview LLM — consome créditos)</label>
+          <p class="text-muted" style="font-size:.7rem;margin:4px 0 0">Sem marcar, o nó Agente IA só simula. Com marcar, gera resposta real sem enviar WhatsApp.</p>
+        </div>
+        <div class="sim-field">
+          <label>Gatilho</label>
+          <select id="sim-trigger-type" class="form-control">
+            <option value="whatsapp_first">Primeira mensagem WhatsApp</option>
+            <option value="whatsapp_message">Mensagem WhatsApp</option>
+            <option value="stage_enter">Entrou no estágio</option>
+            <option value="tag_added">Tag adicionada</option>
+            <option value="contact_created">Lead criado</option>
+            <option value="webhook_received">Webhook / integração</option>
+            <option value="ltv_inactive">LTV — inativo</option>
+          </select>
+        </div>
+        <div class="sim-field" id="sim-wrap-connection">
+          <label>Conexão</label>
+          <select id="sim-connection" class="form-control"></select>
+        </div>
+        <div class="sim-field" id="sim-wrap-tag" style="display:none">
+          <label>Tag</label>
+          <input type="text" id="sim-trigger-tag" class="form-control" placeholder="nome-da-tag">
+        </div>
+        <div class="sim-field" id="sim-wrap-stage" style="display:none">
+          <label>Estágio</label>
+          <select id="sim-trigger-stage" class="form-control">
+            <?php foreach ($stages as $slug => $label): ?>
+            <option value="<?= htmlspecialchars($slug) ?>"><?= htmlspecialchars($label) ?></option>
+            <?php endforeach; ?>
+          </select>
+        </div>
+        <div class="sim-field" id="sim-wrap-webhook" style="display:none">
+          <label>Webhook slug</label>
+          <input type="text" id="sim-trigger-webhook" class="form-control" value="default" placeholder="slug do webhook">
+        </div>
+        <div class="sim-field">
+          <label>Lead teste — nome</label>
+          <input type="text" id="sim-lead-name" class="form-control" value="Maria Silva">
+        </div>
+        <div class="sim-field">
+          <label>Telefone</label>
+          <input type="text" id="sim-lead-phone" class="form-control" value="11999998888">
+        </div>
+      </aside>
+      <section class="sim-panel sim-chat">
+        <h3>Chat de teste</h3>
+        <div id="sim-paused-banner" class="sim-paused-banner" hidden>
+          <strong>Fluxo aguardando resposta</strong> — envie a próxima mensagem para continuar.
+          <button type="button" class="btn btn-outline" id="sim-reset-session" style="font-size:.7rem;margin-left:8px">Nova sessão</button>
+        </div>
+        <div id="sim-worker-warn" class="sim-worker-warn" hidden></div>
+        <div id="sim-chat-messages" class="sim-chat-messages"></div>
+        <div class="sim-chat-input">
+          <textarea id="sim-message" class="form-control" rows="2" placeholder="Digite como se fosse o lead no WhatsApp…"></textarea>
+          <button type="button" class="btn btn-primary" id="sim-send">Enviar</button>
+        </div>
+        <button type="button" class="btn btn-outline" id="sim-reset-chat" style="margin-top:8px;font-size:.8125rem">Limpar chat</button>
+      </section>
+      <aside class="sim-panel">
+        <h3>Passos do fluxo</h3>
+        <div id="sim-steps" class="sim-steps"></div>
+      </aside>
+    </div>
+  </div>
+
+  <div id="panel-runs" style="display:none">
+    <div class="runs-toolbar">
+      <select id="runs-filter-flow" class="form-control"></select>
+      <select id="runs-filter-mode" class="form-control">
+        <option value="live" selected>Só produção</option>
+        <option value="simulate">Só testes</option>
+        <option value="all">Todos</option>
+      </select>
+      <button type="button" class="btn btn-outline" id="runs-refresh"><i class="ph-bold ph-arrows-clockwise"></i> Atualizar</button>
+    </div>
+    <div class="runs-layout">
+      <div id="runs-list" class="runs-list"></div>
+      <div id="runs-detail" class="runs-detail"><p class="text-muted">Selecione uma execução.</p></div>
+    </div>
+  </div>
 
 </main>
 
@@ -1415,7 +1518,9 @@ let flowEditorInitialized = false;
 function ensureFlowEditorInit() {
   if (flowEditorInitialized) return;
   flowEditorInitialized = true;
-  if (typeof initAutomacoesFlow === 'function') initAutomacoesFlow();
+  if (typeof initAutomacoesFlow === 'function') initAutomacoesFlow().then(() => {
+    if (typeof initAutomacoesImprovements === 'function') initAutomacoesImprovements();
+  });
 }
 window.ensureFlowEditorInit = ensureFlowEditorInit;
 
@@ -1490,10 +1595,54 @@ window.FLOW_BOOT = <?= json_encode([
 </script>
 <script src="assets/automacoes-flow-templates.js?v=20260520v"></script>
 <script src="assets/auvvo-pack-flows.js?v=20260520v"></script>
-<script src="assets/automacoes-flow.js?v=20260520v"></script>
-<script src="assets/automacoes-packs.js?v=20260520v"></script>
-<script src="assets/evolution-connect.js?v=20260521"></script>
+<script src="assets/automacoes-flow.js?v=20260524c"></script>
+<script src="assets/automacoes-improvements.js?v=20260524"></script>
+<script src="assets/automacoes-simulator.js?v=20260524"></script>
+<script src="assets/automacoes-runs.js?v=20260524"></script>
+<script src="assets/automacoes-packs.js?v=20260522"></script>
 <script>
+window.setAutomacoesMainTab = function (tab) {
+  var panels = { build: 'panel-build', test: 'panel-test', runs: 'panel-runs' };
+  Object.keys(panels).forEach(function (k) {
+    var el = document.getElementById(panels[k]);
+    if (el) el.style.display = tab === k ? 'block' : 'none';
+    var btn = document.getElementById('tab-' + k);
+    if (btn) btn.classList.toggle('active', tab === k);
+  });
+  if (tab === 'test') {
+    if (typeof window.initAutomacoesSimulator === 'function') window.initAutomacoesSimulator();
+    if (typeof window.refreshSimulatorFlows === 'function') window.refreshSimulatorFlows();
+  }
+  if (tab === 'runs' && typeof window.initAutomacoesRuns === 'function') window.initAutomacoesRuns();
+  if (tab === 'build' && typeof window.ensureFlowEditorInit === 'function') window.ensureFlowEditorInit();
+};
+</script>
+<script>
+async function syncWaConnectionDropdowns() {
+  try {
+    const d = await (await fetch(API + '?action=list_whatsapp_connections')).json();
+    const list = d.connections || [];
+    const base = ['<option value="">— Selecione —</option>'].concat(
+      list.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`)
+    ).join('');
+    const trig = ['<option value="*">Qualquer conexão</option>'].concat(
+      list.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`)
+    ).join('');
+    const b = document.getElementById('b-connection');
+    const a = document.getElementById('a-connection');
+    const t = document.getElementById('a-trigger-connection');
+    if (b) { const p = b.value; b.innerHTML = base; if (p) b.value = p; }
+    if (a) { const p = a.value; a.innerHTML = base; if (p) a.value = p; }
+    if (t) { const p = t.value; t.innerHTML = trig; if (p) t.value = p; }
+    if (window.FLOW_BOOT) {
+      window.FLOW_BOOT.whatsappConnections = list.map(c => ({
+        id: parseInt(c.id, 10), name: c.name, status: c.status || 'offline',
+      }));
+    }
+  } catch (e) {}
+}
+document.addEventListener('DOMContentLoaded', syncWaConnectionDropdowns);
+
 if (typeof initAutomacoesPacks === 'function') {
   initAutomacoesPacks({
     onApplied: function (data) {

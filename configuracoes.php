@@ -146,8 +146,8 @@ $gcal_oauth_ready = GoogleCalendar::isOAuthAppConfigured();
 <?php endif; ?>
 
 <div class="page-header">
-  <div><h1 class="page-title"><?= t('cfg_page_title') ?></h1><p class="text-muted">Central de conta: pipelines CRM, IA, pagamentos, calendário e integrações.</p></div>
-  <a href="crm" class="btn btn-secondary"><i class="ph-bold ph-kanban"></i> Abrir CRM</a>
+  <div><h1 class="page-title"><?= t('cfg_page_title') ?></h1><p class="text-muted">Conta, funis CRM e preferências. Integrações externas ficam em <a href="integracoes">Integrações</a>; WhatsApp em <a href="conexoes">Conexões</a>.</p></div>
+  <a href="integracoes" class="btn btn-secondary"><i class="ph-bold ph-plugs-connected"></i> Integrações</a>
 </div>
 
 <div class="cfg-status-pills">
@@ -159,19 +159,22 @@ $gcal_oauth_ready = GoogleCalendar::isOAuthAppConfigured();
 
 <div class="cfg-layout">
 <nav class="cfg-nav" aria-label="Seções">
-  <span class="cfg-nav-title">Navegação</span>
-  <a href="#crm-pipelines" class="is-active"><i class="ph-bold ph-kanban"></i> Pipelines CRM</a>
-  <a href="#cfg-company"><i class="ph-bold ph-buildings"></i> Empresa</a>
-  <a href="#cfg-ai"><i class="ph-bold ph-brain"></i> Motores IA</a>
-  <a href="#cfg-gcal"><i class="ph-bold ph-calendar"></i> Agenda</a>
-  <a href="#cfg-payments"><i class="ph-bold ph-credit-card"></i> Pagamentos</a>
-  <a href="#cfg-integrations"><i class="ph-bold ph-plugs-connected"></i> Integrações</a>
-  <a href="#cfg-dev"><i class="ph-bold ph-code"></i> Desenvolvedor</a>
+  <span class="cfg-nav-title">Configurações</span>
+  <button type="button" class="cfg-nav-link is-active" data-section="crm-pipelines"><i class="ph-bold ph-kanban"></i> Pipelines CRM</button>
+  <button type="button" class="cfg-nav-link" data-section="cfg-company"><i class="ph-bold ph-buildings"></i> Empresa</button>
+  <button type="button" class="cfg-nav-link" data-section="cfg-ai"><i class="ph-bold ph-brain"></i> Motores IA</button>
+  <button type="button" class="cfg-nav-link" data-section="cfg-gcal"><i class="ph-bold ph-calendar"></i> Agenda</button>
+  <button type="button" class="cfg-nav-link" data-section="cfg-payments"><i class="ph-bold ph-credit-card"></i> Pagamentos</button>
+  <button type="button" class="cfg-nav-link" data-section="cfg-dev"><i class="ph-bold ph-code"></i> Desenvolvedor</button>
+  <div class="cfg-nav-footer">
+    <a href="integracoes"><i class="ph-bold ph-plugs-connected"></i> Hub de integrações</a>
+    <a href="conexoes" style="margin-top:6px;display:flex;align-items:center;gap:8px"><i class="ph-bold ph-whatsapp-logo"></i> Conexões WhatsApp</a>
+  </div>
 </nav>
 
 <div class="cfg-main">
 
-<section id="crm-pipelines" class="cfg-section">
+<section id="crm-pipelines" class="cfg-section cfg-section--active">
   <div class="cfg-section-head">
     <h3><i class="ph-bold ph-funnel"></i> Pipelines do Kanban</h3>
     <p>Crie vários funis (Vendas, Suporte, Parcerias…), personalize estágios, cores e marque ganho/perdido. O CRM usa o pipeline selecionado na barra superior.</p>
@@ -198,7 +201,7 @@ $gcal_oauth_ready = GoogleCalendar::isOAuthAppConfigured();
 <?php csrf_field(); ?>
 <input type="hidden" name="action" value="save_keys">
 
-<section id="cfg-company" class="cfg-section">
+<section id="cfg-company" class="cfg-section" hidden>
 <div class="cfg-section-head" style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px">
   <div>
     <h3><?= t('cfg_company_title') ?></h3>
@@ -224,7 +227,7 @@ $gcal_oauth_ready = GoogleCalendar::isOAuthAppConfigured();
 </div>
 </section>
 
-<section id="cfg-ai" class="cfg-section">
+<section id="cfg-ai" class="cfg-section" hidden>
 <div class="cfg-section-head">
   <h3><?= t('cfg_ai_title') ?></h3>
   <p><?= t('cfg_ai_desc') ?></p>
@@ -269,7 +272,7 @@ $gcal_oauth_ready = GoogleCalendar::isOAuthAppConfigured();
 </div>
 </section>
 
-<section id="cfg-gcal" class="cfg-section">
+<section id="cfg-gcal" class="cfg-section" hidden>
 <div class="cfg-section-head">
   <h3><?= t('cfg_gcal_title') ?></h3>
   <p><?= t('cfg_gcal_desc') ?></p>
@@ -352,7 +355,7 @@ $gcal_oauth_ready = GoogleCalendar::isOAuthAppConfigured();
 </div>
 </section>
 
-<section id="cfg-payments" class="cfg-section">
+<section id="cfg-payments" class="cfg-section" hidden>
 <div class="cfg-section-head">
   <h3><?= t('cfg_gw_title') ?></h3>
   <p><?= t('cfg_gw_desc') ?></p>
@@ -425,18 +428,7 @@ $gcal_oauth_ready = GoogleCalendar::isOAuthAppConfigured();
 </div>
 </section>
 
-<section id="cfg-integrations" class="cfg-section">
-<div class="cfg-section-head">
-  <h3>Integrações inbound (Hotmart, Shopify…)</h3>
-  <p>Leads externos entram no CRM no estágio inicial do pipeline padrão.</p>
-</div>
-<div class="app-card" style="margin-bottom:24px">
-  <p class="text-muted" style="font-size:.875rem;margin-bottom:12px">Crie links, mapeie campos do JSON e conecte leads ao CRM.</p>
-  <a href="webhooks" class="btn btn-primary"><i class="ph-bold ph-plugs-connected"></i> Abrir Integrações · Webhooks</a>
-</div>
-</section>
-
-<section id="cfg-dev" class="cfg-section">
+<section id="cfg-dev" class="cfg-section" hidden>
 <div class="cfg-section-head">
   <h3><?= t('cfg_dev_title') ?></h3>
   <p><?= t('cfg_webhook_desc') ?></p>
@@ -482,6 +474,7 @@ function toggleKey(btn){
   btn.innerHTML = isPass?'<i class="ph-bold ph-eye-slash"></i>':'<i class="ph-bold ph-eye"></i>';
 }
 </script>
-<script src="assets/cfg-pipelines.js?v=20260520q"></script>
+<script src="assets/cfg-pipelines.js?v=20260522"></script>
+<script src="assets/configuracoes.js?v=20260522"></script>
 <?php include __DIR__ . '/includes/toast.php'; ?>
 </body></html>

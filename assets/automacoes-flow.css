@@ -105,11 +105,25 @@
 }
 
 .flow-center {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  grid-template-columns: 1fr auto;
   min-width: 0;
   position: relative;
 }
+.flow-toolbar { grid-column: 1 / -1; }
+.drawflow-wrap { grid-column: 1; min-height: 520px; }
+.flow-playground {
+  display: none;
+  grid-column: 2;
+  grid-row: 2;
+  width: 280px;
+  border-left: 1px solid var(--border-subtle);
+  padding: 12px;
+  background: #fff;
+  overflow-y: auto;
+}
+.flow-playground--open { display: block; }
 
 .flow-toolbar {
   display: flex;
@@ -147,6 +161,18 @@
 }
 
 .flow-toggle input { accent-color: var(--accent-teal); }
+
+.flow-publish-hint {
+  margin: 0;
+  padding: 4px 10px;
+  font-size: .75rem;
+  font-weight: 600;
+  color: #b45309;
+  background: #fffbeb;
+  border: 1px solid #fcd34d;
+  border-radius: 6px;
+  white-space: nowrap;
+}
 
 .drawflow-wrap {
   flex: 1;
@@ -320,6 +346,85 @@
 .fn-action .fn-icon { background: #ecfdf5; color: #047857; }
 .fn-msg .fn-icon { background: #dcfce7; color: #15803d; }
 .fn-memory .fn-icon { background: #ede9fe; color: #6d28d9; }
+.fn-agent .fn-icon { background: #f0e7ff; color: #7c3aed; }
+.fn-agent { border-color: #ddd6fe; }
+.fn-agent .fn-title { color: #5b21b6; }
+
+.flow-palette-btn--agent {
+  border-color: #c4b5fd;
+  background: linear-gradient(135deg, #faf5ff, #fff);
+  color: #6d28d9;
+}
+
+.flow-palette-btn--agent:hover {
+  border-color: #a78bfa;
+  background: #f5f3ff;
+}
+
+.flow-palette-btn--more {
+  border-style: dashed;
+  color: var(--text-muted);
+}
+
+.flow-palette--extra {
+  bottom: 72px;
+  max-width: 280px;
+}
+
+.page-tab-flow--legacy {
+  font-size: .75rem;
+  opacity: .65;
+  margin-left: auto;
+}
+
+.flow-sidebar-subbtns { display: flex; gap: 6px; margin-bottom: 10px; }
+.flow-sidebar-subbtns .btn { flex: 1; padding: 6px 8px; }
+
+.fn-wait-reply .fn-icon { background: #e0f2fe; color: #0369a1; }
+.fn-err {
+  margin: 0 12px 8px;
+  padding: 6px 8px;
+  font-size: .6875rem;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 6px;
+  color: #991b1b;
+}
+.fn-node--highlight .fn-node { box-shadow: 0 0 0 3px #a78bfa; }
+
+.pub-item { display: flex; gap: 10px; padding: 10px; border-radius: 8px; margin-bottom: 8px; background: #f8fafc; }
+.pub-item--ok { border-left: 3px solid #22c55e; }
+.pub-item--fail { border-left: 3px solid #ef4444; background: #fef2f2; }
+.pub-item--warn { border-left: 3px solid #f59e0b; }
+.pub-item--info { border-left: 3px solid #6366f1; opacity: .85; }
+.pub-icon { font-weight: 700; width: 20px; text-align: center; }
+
+.sim-paused-banner {
+  padding: 8px 12px;
+  margin-bottom: 8px;
+  background: #eff6ff;
+  border: 1px solid #93c5fd;
+  border-radius: 8px;
+  font-size: .8125rem;
+}
+.sim-worker-warn {
+  padding: 8px 12px;
+  margin-bottom: 8px;
+  background: #fffbeb;
+  border: 1px solid #fcd34d;
+  border-radius: 8px;
+  font-size: .75rem;
+  color: #92400e;
+}
+.runs-detail-actions { display: flex; gap: 8px; margin: 10px 0; flex-wrap: wrap; }
+.runs-step-link {
+  border: none;
+  background: none;
+  color: var(--accent-teal);
+  font-size: .6875rem;
+  cursor: pointer;
+  text-decoration: underline;
+}
 
 .fn-title {
   font-size: .8125rem;
@@ -1108,4 +1213,70 @@
   text-decoration: underline;
   padding: 0;
   font-size: inherit;
+}
+
+/* Barra de roteamento — funil, linha WA, destino CRM */
+.flow-routing-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 10px 16px;
+  padding: 10px 16px;
+  background: #fff;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.flow-routing-bar__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: .8125rem;
+  color: #334155;
+  flex-shrink: 0;
+}
+.flow-routing-bar__head i {
+  color: #6366f1;
+  font-size: 1rem;
+}
+.flow-routing-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+.route-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: .75rem;
+  line-height: 1.35;
+  background: #f1f5f9;
+  color: #475569;
+  border: 1px solid #e2e8f0;
+}
+.route-chip i {
+  font-size: .875rem;
+  opacity: .85;
+}
+.route-chip--pipe {
+  background: #eef2ff;
+  border-color: #c7d2fe;
+  color: #3730a3;
+}
+.route-chip--trigger {
+  background: #ecfdf5;
+  border-color: #a7f3d0;
+  color: #065f46;
+}
+.route-chip--crm {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+  color: #1e40af;
+}
+.route-chip--warn {
+  background: #fffbeb;
+  border-color: #fcd34d;
+  color: #92400e;
 }

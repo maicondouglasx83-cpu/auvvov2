@@ -33,6 +33,8 @@ $cur_label = $langs[$cur] ?? 'PT-BR';
         
         <a href="agentes" class="nav-item <?php echo ($current_route == 'agentes') ? 'active' : ''; ?>"><i class="ph-bold ph-robot"></i> <?= t('nav_agents') ?></a>
         
+        <a href="conexoes" class="nav-item <?php echo ($current_route == 'conexoes') ? 'active' : ''; ?>"><i class="ph-bold ph-whatsapp-logo"></i> Conexões</a>
+        
         <a href="crm" class="nav-item <?php echo ($current_route == 'crm') ? 'active' : ''; ?>"><i class="ph-bold ph-address-book"></i> CRM</a>
         
         <a href="campanhas" class="nav-item <?php echo ($current_route == 'campanhas') ? 'active' : ''; ?>"><i class="ph-bold ph-megaphone"></i> <?= t('nav_campaigns') ?></a>

@@ -5,7 +5,7 @@
 declare(strict_types=1);
 
 /** Incrementar ao adicionar migração que altera schema em produção. */
-const AUVVO_SCHEMA_VERSION = 42;
+const AUVVO_SCHEMA_VERSION = 44;
 
 function auvvo_run_migrations(PDO $pdo): void
 {
@@ -51,6 +51,8 @@ function auvvo_run_migrations(PDO $pdo): void
     auvvo_migration_contacts_phone_cleanup($pdo);
     auvvo_migration_whatsapp_connections($pdo);
     auvvo_migration_connection_id_columns($pdo);
+    auvvo_migration_automation_runs($pdo);
+    auvvo_migration_automation_wait_states($pdo);
 
     auvvo_migrations_mark_schema_current($pdo);
 }
@@ -142,6 +144,72 @@ function auvvo_migration_automation_dedupe(PDO $pdo): void
             fired_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             UNIQUE KEY uq_user_contact_key (user_id, contact_id, dedupe_key),
             KEY idx_contact (contact_id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    ");
+}
+
+function auvvo_migration_automation_runs(PDO $pdo): void
+{
+    $pdo->exec("
+        CREATE TABLE IF NOT EXISTS crm_automation_runs (
+            id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            user_id INT UNSIGNED NOT NULL,
+            flow_id INT UNSIGNED NULL,
+            contact_id INT UNSIGNED NULL,
+            mode ENUM('simulate','live') NOT NULL DEFAULT 'live',
+            trigger_type VARCHAR(64) NOT NULL DEFAULT '',
+            trigger_value VARCHAR(128) NOT NULL DEFAULT '',
+            message_preview VARCHAR(500) NULL,
+            status VARCHAR(32) NOT NULL DEFAULT 'running',
+            error_message VARCHAR(500) NULL,
+            meta_json JSON NULL,
+            started_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            finished_at TIMESTAMP NULL DEFAULT NULL,
+            updated_at TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
+            KEY idx_user_flow (user_id, flow_id),
+            KEY idx_user_mode (user_id, mode),
+            KEY idx_user_started (user_id, started_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    ");
+    $pdo->exec("
+        CREATE TABLE IF NOT EXISTS crm_automation_run_steps (
+            id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            run_id BIGINT UNSIGNED NOT NULL,
+            step_order INT UNSIGNED NOT NULL DEFAULT 0,
+            node_id VARCHAR(32) NOT NULL DEFAULT '',
+            node_class VARCHAR(64) NOT NULL DEFAULT '',
+            node_label VARCHAR(255) NOT NULL DEFAULT '',
+            status VARCHAR(32) NOT NULL DEFAULT 'ok',
+            detail TEXT NULL,
+            branch VARCHAR(32) NULL,
+            payload_json JSON NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            KEY idx_run_order (run_id, step_order)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    ");
+}
+
+function auvvo_migration_automation_wait_states(PDO $pdo): void
+{
+    $pdo->exec("
+        CREATE TABLE IF NOT EXISTS crm_automation_wait_states (
+            id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            user_id INT UNSIGNED NOT NULL,
+            flow_id INT UNSIGNED NOT NULL,
+            run_id BIGINT UNSIGNED NULL,
+            contact_id INT UNSIGNED NOT NULL,
+            node_id VARCHAR(32) NOT NULL DEFAULT '',
+            mode ENUM('simulate','live') NOT NULL DEFAULT 'live',
+            keyword_filter VARCHAR(255) NULL,
+            reply_node_ids JSON NULL,
+            timeout_node_ids JSON NULL,
+            timeout_at TIMESTAMP NULL DEFAULT NULL,
+            status VARCHAR(32) NOT NULL DEFAULT 'waiting',
+            meta_json JSON NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
+            KEY idx_user_contact_status (user_id, contact_id, status),
+            KEY idx_timeout (status, timeout_at)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     ");
 }

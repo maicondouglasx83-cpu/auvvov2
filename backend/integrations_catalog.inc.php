@@ -24,7 +24,7 @@ function auvvo_integrations_catalog(): array
             'icon'        => 'ph-calendar',
             'type'        => 'oauth',
             'connect_url' => 'backend/google_calendar_connect.php',
-            'config_url'  => 'configuracoes',
+            'config_url'  => 'configuracoes#gcal',
             'category'    => 'google',
         ],
         [
@@ -70,12 +70,12 @@ function auvvo_integrations_catalog(): array
         [
             'id'          => 'evolution',
             'name'        => 'WhatsApp (Evolution)',
-            'description' => 'Conexão dos agentes via Evolution API.',
+            'description' => 'Linhas WhatsApp nomeadas — conecte QR e use em automações.',
             'icon'        => 'ph-whatsapp-logo',
             'type'        => 'native',
-            'connect_url' => 'agentes',
-            'config_url'  => 'configuracoes',
-            'category'    => 'internal',
+            'connect_url' => 'conexoes',
+            'config_url'  => 'conexoes',
+            'category'    => 'comms',
         ],
         [
             'id'          => 'openrouter',
@@ -83,9 +83,9 @@ function auvvo_integrations_catalog(): array
             'description' => 'Motor de linguagem dos agentes.',
             'icon'        => 'ph-brain',
             'type'        => 'config',
-            'connect_url' => 'configuracoes',
-            'config_url'  => 'configuracoes',
-            'category'    => 'internal',
+            'connect_url' => 'configuracoes#ai',
+            'config_url'  => 'configuracoes#ai',
+            'category'    => 'ai',
         ],
     ];
 }
@@ -129,6 +129,15 @@ function auvvo_integration_status(PDO $pdo, int $userId, string $integrationId):
             $active = count(array_filter($keys, static fn($k) => (int) ($k['is_active'] ?? 0) === 1));
 
             return ['connected' => $active > 0, 'detail' => "{$active} chave(s) ativa(s)"];
+        case 'evolution':
+            require_once __DIR__ . '/whatsapp_connections.inc.php';
+            $list = auvvo_whatsapp_connections_list($pdo, $userId);
+            $online = count(array_filter($list, static fn ($c) => ($c['status'] ?? '') === 'online'));
+
+            return [
+                'connected' => $online > 0,
+                'detail'    => count($list) ? ($online . ' online · ' . count($list) . ' linha(s)') : 'Nenhuma linha',
+            ];
         default:
             return ['connected' => true, 'detail' => 'Nativo'];
     }

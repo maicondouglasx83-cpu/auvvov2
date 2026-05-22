@@ -8,6 +8,38 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/context_memory.inc.php';
 
+/** Gatilhos inbound WhatsApp não filtram pelo pipeline atual do contato (lead novo entra no funil do fluxo). */
+function auvvo_crm_trigger_skips_pipeline_filter(string $triggerType): bool
+{
+    return in_array($triggerType, ['whatsapp_first', 'whatsapp_message', 'contact_created'], true);
+}
+
+/**
+ * Move o contato para o funil do fluxo/regra antes de executar ações.
+ *
+ * @param array<string, mixed> $contact
+ */
+function auvvo_crm_sync_contact_to_pipeline(PDO $pdo, int $userId, array &$contact, int $targetPipelineId): void
+{
+    if ($userId <= 0 || $targetPipelineId <= 0 || empty($contact['id'])) {
+        return;
+    }
+    if ((int) ($contact['pipeline_id'] ?? 0) === $targetPipelineId) {
+        return;
+    }
+
+    require_once __DIR__ . '/CrmPipelines.php';
+    require_once __DIR__ . '/Contacts.php';
+
+    $pipes = new CrmPipelines($pdo);
+    $slug = $pipes->firstStageSlug($targetPipelineId);
+    $pipes->syncContactStage((int) $contact['id'], $targetPipelineId, $slug);
+    $fresh = (new Contacts($pdo))->get($userId, (int) $contact['id']);
+    if ($fresh) {
+        $contact = $fresh;
+    }
+}
+
 /**
  * Garante tags, custom_fields e memory_json no contato (para condições e templates).
  *
@@ -172,7 +204,7 @@ function auvvo_crm_run_automation_events(
 function auvvo_crm_flow_action_config(array $nodeData): array
 {
     $exec = $nodeData;
-    unset($exec['action_type'], $exec['label']);
+    unset($exec['action_type'], $exec['label'], $exec['_node_id'], $exec['_node_label']);
     foreach (auvvo_crm_condition_keys() as $ck) {
         unset($exec[$ck]);
     }

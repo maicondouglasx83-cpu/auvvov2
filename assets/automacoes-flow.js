@@ -38,6 +38,24 @@
       window.fillAutomationStageSelects();
     }
     if (typeof loadFlowList === 'function') loadFlowList();
+    updateFlowRoutingSummary();
+  }
+
+  function onFlowPipelineChange() {
+    syncFlowPipelineToBoot();
+    if (editor) {
+      try {
+        const { export: remapped, changed } = remapFlowExportStages(editor.export(), getFlowPipelineId());
+        if (changed) {
+          editor.clear();
+          editor.import(remapped);
+          Object.keys(editor.drawflow.drawflow.Home.data || {}).forEach((nid) => refreshNodeVisual(nid));
+          window.toast?.('Estágios ajustados ao funil deste fluxo.', 'info');
+        }
+      } catch (e) {}
+    }
+    if (selectedNodeId) renderPropsPanel(selectedNodeId);
+    updateFlowRoutingSummary();
   }
 
   function initFlowPipelineSelect() {
@@ -48,16 +66,10 @@
       .join('');
     const pid = B.automationPipelineId || B.defaultPipelineId || B.pipelines[0]?.id || 0;
     sel.value = String(pid);
-    sel.addEventListener('change', () => {
-      syncFlowPipelineToBoot();
-      if (selectedNodeId) {
-        const node = editor?.drawflow?.drawflow?.Home?.data?.[selectedNodeId];
-        if (node) renderPropsPanel(node);
-      }
-    });
+    sel.addEventListener('change', onFlowPipelineChange);
   }
 
-  window.onFlowPipelineChange = syncFlowPipelineToBoot;
+  window.onFlowPipelineChange = onFlowPipelineChange;
 
   const TRIGGER_LABELS = {
     whatsapp_first: 'Primeira mensagem WhatsApp',
@@ -160,6 +172,42 @@
   let inboundWebhooks = [];
   let outboundWebhooks = [];
   let httpPresets = [];
+  let nodeStatsMap = {};
+  let nodeErrorsMap = {};
+
+  async function loadFlowNodeStats(flowId) {
+    if (!flowId) {
+      nodeStatsMap = {};
+      return;
+    }
+    try {
+      const d = await (await fetch(API + '?action=crm_flow_node_stats&flow_id=' + flowId)).json();
+      nodeStatsMap = d.stats || {};
+    } catch (e) {
+      nodeStatsMap = {};
+    }
+  }
+
+  async function loadFlowNodeErrors(flowId) {
+    if (!flowId) {
+      nodeErrorsMap = {};
+      return;
+    }
+    try {
+      const d = await (await fetch(API + '?action=crm_flow_node_errors&flow_id=' + flowId)).json();
+      nodeErrorsMap = d.errors || {};
+    } catch (e) {
+      nodeErrorsMap = {};
+    }
+  }
+
+  function nodeErrorFor(nodeId) {
+    return nodeErrorsMap[String(nodeId)] || null;
+  }
+
+  function statsForNode(nodeId) {
+    return nodeStatsMap[String(nodeId)] || { in: 0, ok: 0, err: 0 };
+  }
 
   function esc(s) {
     return String(s)
@@ -177,6 +225,8 @@
       flow_action: 'fn-action',
       flow_message: 'fn-msg',
       flow_memory: 'fn-memory',
+      flow_agent: 'fn-agent',
+      flow_wait_reply: 'fn-wait-reply',
     }[type] || 'fn-action';
     const icon = {
       flow_trigger: 'ph-play-circle',
@@ -186,8 +236,11 @@
       flow_action: 'ph-lightning',
       flow_message: 'ph-whatsapp-logo',
       flow_memory: 'ph-brain',
+      flow_agent: 'ph-robot',
+      flow_wait_reply: 'ph-chat-teardrop-dots',
     }[type] || 'ph-circle';
     const st = stats || { in: 0, ok: 0, err: 0 };
+    const err = stats && stats._errMsg ? `<div class="fn-err" title="${esc(stats._errMsg)}">⚠ ${esc(String(stats._errMsg).slice(0, 40))}</div>` : '';
     return `
       <div class="fn-node ${cls}">
         <div class="fn-head">
@@ -198,6 +251,7 @@
           </div>
         </div>
         <div class="fn-body">${body}</div>
+        ${err}
         <div class="fn-stats">
           <div class="fn-stat"><span>Entraram</span><em>${st.in}</em></div>
           <div class="fn-stat"><span>Sucesso</span><em>${st.ok}</em></div>
@@ -212,10 +266,12 @@
         return {
           trigger_type: 'whatsapp_first',
           trigger_value: (B.whatsappConnections && B.whatsappConnections[0]) ? String(B.whatsappConnections[0].id) : '*',
+          sync_pipeline_on_enter: 1,
           label: 'Primeira mensagem WhatsApp',
         };
       case 'flow_condition':
         return {
+          pipeline_id: 0,
           require_tag: '',
           exclude_tag: '',
           stage_is: '',
@@ -253,8 +309,22 @@
           message: 'Olá {{nome}}!',
           label: 'Mensagem WhatsApp',
         };
+      case 'flow_agent':
+        return {
+          connection_id: (B.whatsappConnections && B.whatsappConnections[0]) ? B.whatsappConnections[0].id : 0,
+          agent_id: (B.agents && B.agents[0]) ? B.agents[0].id : 0,
+          mission: '',
+          mode: 'respond',
+          label: 'Agente IA',
+        };
+      case 'flow_wait_reply':
+        return {
+          timeout_hours: 24,
+          keyword_contains: '',
+          label: 'Aguardar resposta',
+        };
       case 'flow_action':
-        return { action_type: 'assign_agent', agent_id: (B.agents && B.agents[0]) ? B.agents[0].id : 0, label: 'Ação' };
+        return { action_type: 'add_tag', tag: 'novo-lead', pipeline_id: 0, label: 'CRM — Tag' };
       default:
         return {};
     }
@@ -267,19 +337,25 @@
       let v = data.trigger_value || '*';
       const stg = flowStages();
       if (data.trigger_type === 'stage_enter' && stg[v]) v = stg[v];
-      else if ((data.trigger_type === 'whatsapp_first' || data.trigger_type === 'whatsapp_message') && v !== '*') {
-        const cn = (B.whatsappConnections || []).find((c) => String(c.id) === String(v));
-        v = cn ? cn.name : 'Conexão #' + v;
+      else if ((data.trigger_type === 'whatsapp_first' || data.trigger_type === 'whatsapp_message')) {
+        v = connectionLabelById(v);
       } else if (data.trigger_type === 'contact_created' && v === 'whatsapp') v = 'Origem WhatsApp';
-      return { title: 'Início', sub: 'Gatilho', body: `<strong>${esc(t)}</strong><br>${esc(v)}` };
+      const syncNote = ['whatsapp_first', 'whatsapp_message', 'contact_created'].includes(data.trigger_type)
+        ? (data.sync_pipeline_on_enter === 0 ? ' · lead não muda de funil' : ' · → ' + pipelineNameById(getFlowPipelineId()))
+        : '';
+      return { title: 'Início', sub: 'Gatilho', body: `<strong>${esc(t)}</strong><br>${esc(v)}${syncNote}` };
     }
     if (type === 'flow_condition') {
       const parts = [];
+      const cpid = parseInt(data.pipeline_id, 10) || getFlowPipelineId();
+      if (parseInt(data.pipeline_id, 10) > 0) {
+        parts.push('Funil: ' + pipelineNameById(cpid));
+      }
       if (data.require_tag) parts.push('Tag «' + data.require_tag + '»');
       if (data.exclude_tag) parts.push('Sem «' + data.exclude_tag + '»');
-      const stg = flowStages();
+      const stg = stagesForPipeline(cpid);
       if (data.stage_is) parts.push('Estágio: ' + (stg[data.stage_is] || data.stage_is));
-      if (data.stage_not) parts.push('≠ ' + data.stage_not);
+      if (data.stage_not) parts.push('≠ ' + (stg[data.stage_not] || data.stage_not));
       if (data.agent_id) {
         const ag = (B.agents || []).find((a) => String(a.id) === String(data.agent_id));
         parts.push('Agente: ' + (ag ? ag.name : '#' + data.agent_id));
@@ -323,9 +399,35 @@
         body: msg ? esc(msg) + (data.message.length > 60 ? '…' : '') : '<em>Configure a mensagem</em>',
       };
     }
+    if (type === 'flow_agent') {
+      const ag = (B.agents || []).find((a) => String(a.id) === String(data.agent_id));
+      const conn = (B.whatsappConnections || []).find((c) => String(c.id) === String(data.connection_id));
+      const mission = (data.mission || '').slice(0, 50);
+      return {
+        title: 'Agente IA',
+        sub: (ag ? ag.name : 'Agente') + (conn ? ' · ' + conn.name : ''),
+        body: mission
+          ? esc(mission) + (data.mission.length > 50 ? '…' : '')
+          : '<em>Pensa e responde no WhatsApp</em>',
+      };
+    }
+    if (type === 'flow_wait_reply') {
+      const kw = (data.keyword_contains || '').trim();
+      return {
+        title: 'Aguardar resposta',
+        sub: 'Conversacional',
+        body: `Timeout <strong>${data.timeout_hours || 24}h</strong>${kw ? ' · «' + esc(kw) + '»' : ''}<br><small>Azul = respondeu · vermelho = timeout</small>`,
+      };
+    }
     if (type === 'flow_action') {
       const al = ACTION_LABELS[data.action_type] || data.action_type;
-      return { title: 'Ação', sub: al, body: esc(data.label || al) };
+      let body = esc(data.label || al);
+      if (data.action_type === 'move_stage') {
+        const mp = parseInt(data.pipeline_id, 10) || getFlowPipelineId();
+        const stg = stagesForPipeline(mp)[data.stage] || data.stage || '—';
+        body = `<strong>${esc(pipelineNameById(mp))}</strong><br>→ ${esc(stg)}`;
+      }
+      return { title: 'Ação CRM', sub: al, body };
     }
     if (type === 'flow_memory') {
       const modes = {
@@ -354,7 +456,9 @@
     if (!el) return;
     const wrap = el.parentElement;
     if (!wrap) return;
-    const stats = node.data._stats || { in: 0, ok: 0, err: 0 };
+    const stats = statsForNode(nodeId);
+    const err = nodeErrorFor(nodeId);
+    if (err) stats._errMsg = err.message;
     const tmp = document.createElement('div');
     tmp.innerHTML = nodeHtml(node.class, sum.title, sum.sub, sum.body, stats);
     const newInner = tmp.firstElementChild;
@@ -371,6 +475,7 @@
     editor.reroute_fix_curvature = true;
     editor.curvature = 0.4;
     editor.start();
+    window._flowEditor = editor;
 
     editor.on('nodeSelected', (id) => {
       selectedNodeId = id;
@@ -381,8 +486,13 @@
       selectedNodeId = null;
       renderPropsPanel(null);
     });
-    editor.on('nodeCreated', (id) => refreshNodeVisual(id));
+    editor.on('nodeCreated', (id) => {
+      refreshNodeVisual(id);
+      updateFlowRoutingSummary();
+    });
     editor.on('nodeDataChanged', (id) => refreshNodeVisual(id));
+    editor.on('connectionCreated', () => updateFlowRoutingSummary());
+    editor.on('connectionRemoved', () => updateFlowRoutingSummary());
 
     if (window.innerWidth > 1200) {
       document.getElementById('btn-props-mobile')?.addEventListener('click', () => {
@@ -391,9 +501,9 @@
     }
   }
 
-  function addNode(type, x, y) {
+  function addNode(type, x, y, preset) {
     if (!editor) return;
-    const data = defaultNodeData(type);
+    const data = { ...defaultNodeData(type), ...(preset || {}) };
     const sum = summarizeNode(type, data);
     const html = nodeHtml(type, sum.title, sum.sub, sum.body);
     let inputs = 1;
@@ -401,7 +511,7 @@
     if (type === 'flow_trigger') {
       inputs = 0;
       outputs = 1;
-    } else if (type === 'flow_condition' || type === 'flow_randomizer') {
+    } else if (type === 'flow_condition' || type === 'flow_randomizer' || type === 'flow_wait_reply') {
       outputs = 2;
     }
     const id = editor.addNode(type, inputs, outputs, x || 80 + Math.random() * 80, y || 80 + Math.random() * 80, type, data, html);
@@ -437,12 +547,101 @@
     };
   }
 
+  function stagesForPipeline(pid) {
+    const id = parseInt(pid, 10) || getFlowPipelineId();
+    const map = (B.stagesByPipeline && B.stagesByPipeline[id]) || null;
+    if (map && Object.keys(map).length) return map;
+    return flowStages();
+  }
+
+  function pipelineOptionsHtml(selectedPid, includeFlowDefault) {
+    const sel = parseInt(selectedPid, 10) || 0;
+    let h = '';
+    if (includeFlowDefault !== false) {
+      h += `<option value="0" ${sel === 0 ? 'selected' : ''}>Funil deste fluxo (${esc(pipelineNameById(getFlowPipelineId()))})</option>`;
+    }
+    h += (B.pipelines || [])
+      .map((p) => `<option value="${p.id}" ${sel === parseInt(p.id, 10) ? 'selected' : ''}>${esc(p.name)}</option>`)
+      .join('');
+    return h;
+  }
+
   function stageOptions(sel) {
-    const stages = flowStages();
+    return stageOptionsForPipeline(getFlowPipelineId(), sel);
+  }
+
+  function stageOptionsForPipeline(pid, sel) {
+    const stages = stagesForPipeline(pid);
     return Object.keys(stages)
       .map((k) => `<option value="${esc(k)}" ${sel === k ? 'selected' : ''}>${esc(stages[k])}</option>`)
       .join('');
   }
+
+  function connectionLabelById(id) {
+    if (!id || id === '*') return 'Qualquer linha';
+    const c = (B.whatsappConnections || []).find((x) => String(x.id) === String(id));
+    if (!c) return 'Linha #' + id;
+    const st = c.status === 'connected' || c.status === 'online' ? '' : ' (' + (c.status || 'offline') + ')';
+    return (c.name || 'Conexão') + st;
+  }
+
+  function updateFlowRoutingSummary() {
+    const el = document.getElementById('flow-routing-summary');
+    if (!el) return;
+    const pid = getFlowPipelineId();
+    const chips = [];
+    chips.push(`<span class="route-chip route-chip--pipe"><i class="ph-bold ph-funnel"></i> Funil: <strong>${esc(pipelineNameById(pid))}</strong></span>`);
+    if (!editor) {
+      el.innerHTML = chips.join('');
+      return;
+    }
+    let exported;
+    try {
+      exported = editor.export();
+    } catch (e) {
+      el.innerHTML = chips.join('');
+      return;
+    }
+    const nodes = exported?.drawflow?.Home?.data || {};
+    const triggers = [];
+    const crmMoves = [];
+    let wildcardWa = false;
+    Object.values(nodes).forEach((n) => {
+      const d = n.data || {};
+      if (n.name === 'flow_trigger') {
+        const tt = d.trigger_type || '';
+        let detail = TRIGGER_LABELS[tt] || tt;
+        if (['whatsapp_first', 'whatsapp_message'].includes(tt)) {
+          const connId = d.trigger_value || '*';
+          detail += ' · ' + connectionLabelById(connId);
+          if (connId === '*' || connId === '0' || connId === '') wildcardWa = true;
+        } else if (d.trigger_value && d.trigger_value !== '*') {
+          detail += ' · ' + d.trigger_value;
+        }
+        if (['whatsapp_first', 'whatsapp_message', 'contact_created'].includes(tt)) {
+          detail += d.sync_pipeline_on_enter === 0 ? ' (sem mover funil)' : ' → funil do fluxo';
+        }
+        triggers.push(detail);
+      }
+      if (n.name === 'flow_action' && d.action_type === 'move_stage') {
+        const mp = parseInt(d.pipeline_id, 10) || pid;
+        const stg = stagesForPipeline(mp)[d.stage] || d.stage || '?';
+        crmMoves.push(`${esc(pipelineNameById(mp))} → ${esc(stg)}`);
+      }
+    });
+    if (triggers.length) {
+      chips.push(`<span class="route-chip route-chip--trigger"><i class="ph-bold ph-play-circle"></i> Gatilhos: ${esc(triggers.join(' · '))}</span>`);
+    }
+    if (wildcardWa) {
+      chips.push('<span class="route-chip route-chip--warn"><i class="ph-bold ph-warning"></i> «Qualquer linha» — defina uma conexão por fluxo</span>');
+    }
+    if (crmMoves.length) {
+      chips.push(`<span class="route-chip route-chip--crm"><i class="ph-bold ph-columns"></i> CRM: ${crmMoves.join(' · ')}</span>`);
+    }
+    el.innerHTML = chips.join('');
+  }
+
+  window.updateFlowRoutingSummary = updateFlowRoutingSummary;
 
   function agentOptions(sel, includeEmpty) {
     let h = includeEmpty ? '<option value="0">— Lead sem filtro de agente —</option>' : '';
@@ -691,6 +890,8 @@
   let condAgentPicker = null;
   let actionAgentPicker = null;
   let actionConnectionPicker = null;
+  let agentNodeConnectionPicker = null;
+  let agentNodeAgentPicker = null;
 
   function renderPropsPanel(nodeId) {
     const body = document.getElementById('flow-props-body');
@@ -709,11 +910,14 @@
     if (type === 'flow_trigger') {
       const pipeLabel = esc(pipelineNameById(getFlowPipelineId()));
       html += `
-        <div class="props-callout props-callout-info">Funil: <strong>${pipeLabel}</strong> — só dispara para leads neste pipeline. Estágios do gatilho usam as colunas desse funil.</div>
-        <div class="props-callout props-callout-info">Saída única: conecte ao próximo nó após o gatilho.</div>
+        <div class="props-callout props-callout-info">Funil do fluxo: <strong>${pipeLabel}</strong> — leads WhatsApp podem ser movidos para este funil ao disparar (configurável abaixo).</div>
         ${propsField('Tipo de gatilho', '<div class="auv-picker" id="picker-trigger-type"></div>')}
-        <div id="wrap-trigger-agent" style="${['whatsapp_first','whatsapp_message'].includes(d.trigger_type) ? '' : 'display:none'}">
-          ${propsField('Conexão WhatsApp', '<div class="auv-picker" id="picker-trigger-agent"></div>', 'Qual número Evolution dispara este fluxo')}
+        <div id="wrap-trigger-connection" style="${['whatsapp_first','whatsapp_message'].includes(d.trigger_type) ? '' : 'display:none'}">
+          ${propsField('Linha WhatsApp que dispara', '<div class="auv-picker" id="picker-trigger-agent"></div>', 'Recomendado: uma linha específica por fluxo (evita conflito com «Qualquer»)')}
+        </div>
+        <div id="wrap-trigger-pipeline-sync" style="${['whatsapp_first','whatsapp_message','contact_created'].includes(d.trigger_type) ? '' : 'display:none'}">
+          <label class="props-check"><input type="checkbox" id="p-trigger-sync-pipeline" ${d.sync_pipeline_on_enter !== 0 ? 'checked' : ''}> Mover lead para o funil deste fluxo ao disparar</label>
+          <p class="props-field-hint">Ex.: lead novo no WhatsApp entra no funil <strong>${pipeLabel}</strong> antes das ações CRM.</p>
         </div>
         <div id="p-trigger-value-wrap" class="props-field">
           <label class="props-field-label" id="p-trigger-value-label">Detalhe do gatilho</label>
@@ -731,14 +935,18 @@
             </select>
           </div>
           <p class="props-field-hint" id="p-trigger-hint"></p>
-        </div>`;
+        </div>
+        ${propsField('Cooldown (mensagens)', `<select class="auv-input auv-native-select" id="p-trigger-cooldown">
+            <option value="none" ${(d.cooldown_mode || 'none') === 'none' ? 'selected' : ''}>Toda mensagem dispara</option>
+            <option value="once_per_day" ${d.cooldown_mode === 'once_per_day' ? 'selected' : ''}>Máx. 1× por lead por dia</option>
+          </select>`, 'Só para gatilho «Qualquer mensagem»')}`;
     } else if (type === 'flow_condition') {
       const tagsBlock = `
         ${propsField('Exigir tag', '<input class="auv-input" id="p-require-tag" value="' + esc(d.require_tag || '') + '" placeholder="ex: vip, cliente">')}
         ${propsField('Excluir tag', '<input class="auv-input" id="p-exclude-tag" value="' + esc(d.exclude_tag || '') + '" placeholder="ex: atendido">')}`;
       const funnelBlock = `
-        ${propsField('Estágio deve ser', '<select class="auv-input auv-native-select" id="p-stage-is"><option value="">— Qualquer —</option>' + stageOptions(d.stage_is || '') + '</select>')}
-        ${propsField('Estágio não pode ser', '<select class="auv-input auv-native-select" id="p-stage-not"><option value="">— Ignorar —</option>' + stageOptions(d.stage_not || '') + '</select>')}
+        ${propsField('Estágio deve ser', '<select class="auv-input auv-native-select" id="p-stage-is"><option value="">— Qualquer —</option>' + stageOptionsForPipeline(d.pipeline_id || getFlowPipelineId(), d.stage_is || '') + '</select>')}
+        ${propsField('Estágio não pode ser', '<select class="auv-input auv-native-select" id="p-stage-not"><option value="">— Ignorar —</option>' + stageOptionsForPipeline(d.pipeline_id || getFlowPipelineId(), d.stage_not || '') + '</select>')}
         ${propsField('Agente do lead', '<div class="auv-picker" id="picker-cond-agent"></div>')}
         <label class="props-check"><input type="checkbox" id="p-agent-unassigned" ${d.agent_unassigned ? 'checked' : ''}> Apenas lead sem agente</label>`;
       const msgBlock = `
@@ -756,6 +964,7 @@
         ${propsField('Dias úteis', '<input class="auv-input" id="p-bh-days" value="' + esc(d.bh_weekdays || '1,2,3,4,5') + '" placeholder="1=seg … 7=dom">')}`;
       html += `
         <div class="props-callout">Filtros em <strong>E</strong> (todos obrigatórios se preenchidos). <span class="props-legend"><i class="dot dot-ok"></i> azul = sim</span> <span class="props-legend"><i class="dot dot-no"></i> vermelho = não</span></div>
+        ${propsField('Funil dos estágios', `<select class="auv-input auv-native-select" id="p-cond-pipeline">${pipelineOptionsHtml(d.pipeline_id || 0)}</select>`, 'Estágios «deve ser / não pode ser» usam colunas deste funil')}
         ${propsDetails('Tags', 'ph-tag', tagsBlock, true)}
         ${propsDetails('Funil e agente', 'ph-columns', funnelBlock, true)}
         ${propsDetails('Mensagem WhatsApp', 'ph-chats-circle', msgBlock, true)}
@@ -790,12 +999,28 @@
         <div class="props-callout">O restante vai automaticamente para o ramo B.</div>`;
     } else if (type === 'flow_delay') {
       html += propsField('Aguardar (minutos)', '<input type="number" class="auv-input" id="p-delay" min="1" max="43200" value="' + (d.delay_minutes ?? 5) + '">', 'Processado pelo worker Node (sem cron PHP)');
+    } else if (type === 'flow_wait_reply') {
+      html += `
+        <div class="props-callout props-callout-info">Pausa o fluxo até o lead responder no WhatsApp. Saída <strong>azul</strong> = respondeu · <strong>vermelha</strong> = timeout.</div>
+        ${propsField('Timeout (horas)', '<input type="number" class="auv-input" id="p-wait-hours" min="1" max="168" value="' + (d.timeout_hours ?? 24) + '">')}
+        ${propsField('Resposta deve conter (opcional)', '<input class="auv-input" id="p-wait-keyword" value="' + esc(d.keyword_contains || '') + '" placeholder="sim, quero, agendar">')}`;
     } else if (type === 'flow_message') {
       html += `
         ${propsField('Conexão (linha)', '<div class="auv-picker" id="picker-msg-connection"></div>', 'Número WhatsApp que envia')}
         ${propsField('Agente (cérebro)', '<div class="auv-picker" id="picker-msg-agent"></div>', 'Opcional — contexto do agente na mensagem')}
         ${propsField('Texto da mensagem', varChipsHtml('p-msg-text') + '<textarea class="auv-input auv-textarea" id="p-msg-text" rows="6">' + esc(d.message || '') + '</textarea>')}
         <div class="msg-preview"><span class="msg-preview-label">Prévia</span><p id="p-msg-preview"></p></div>`;
+    } else if (type === 'flow_agent') {
+      html += `
+        <div class="props-callout props-callout-info">O agente lê a mensagem do gatilho, pensa com IA, responde no WhatsApp e pode executar ferramentas (estágio, tags, agenda).</div>
+        ${propsField('Conexão (linha)', '<div class="auv-picker" id="picker-agent-connection"></div>')}
+        ${propsField('Agente (cérebro)', '<div class="auv-picker" id="picker-agent-brain"></div>')}
+        ${propsField('Modo', `<select class="auv-input auv-native-select" id="p-agent-mode">
+            <option value="respond" ${d.mode !== 'tools_only' ? 'selected' : ''}>Responder no WhatsApp</option>
+            <option value="tools_only" ${d.mode === 'tools_only' ? 'selected' : ''}>Só executar ferramentas (sem texto extra)</option>
+          </select>`)}
+        ${propsField('Missão (opcional)', varChipsHtml('p-agent-mission') + '<textarea class="auv-input auv-textarea" id="p-agent-mission" rows="4" placeholder="Ex.: Qualificar o lead e agendar demo">' + esc(d.mission || '') + '</textarea>', 'Instrução temporária para a próxima resposta IA')}
+        <div class="props-callout">Quando este nó responde, a IA padrão do webhook <strong>não</strong> dispara de novo.</div>`;
     } else if (type === 'flow_action') {
       html += `
         ${propsField('Tipo de ação', '<div class="auv-picker" id="picker-action-type"></div>')}
@@ -806,14 +1031,16 @@
   }
 
   function updateTriggerValueVisibility(tt) {
-    const agentWrap = document.getElementById('wrap-trigger-agent');
+    const connWrap = document.getElementById('wrap-trigger-connection');
+    const syncWrap = document.getElementById('wrap-trigger-pipeline-sync');
     const stage = document.getElementById('p-trigger-stage');
     const tag = document.getElementById('p-trigger-tag');
     const wh = document.getElementById('p-trigger-webhook');
     const src = document.getElementById('p-trigger-source');
     const hint = document.getElementById('p-trigger-hint');
     const lbl = document.getElementById('p-trigger-value-label');
-    if (agentWrap) agentWrap.style.display = ['whatsapp_first', 'whatsapp_message'].includes(tt) ? 'block' : 'none';
+    if (connWrap) connWrap.style.display = ['whatsapp_first', 'whatsapp_message'].includes(tt) ? 'block' : 'none';
+    if (syncWrap) syncWrap.style.display = ['whatsapp_first', 'whatsapp_message', 'contact_created'].includes(tt) ? 'block' : 'none';
     if (stage) stage.style.display = tt === 'stage_enter' ? 'block' : 'none';
     if (tag) tag.style.display = tt === 'tag_added' ? 'block' : 'none';
     if (wh) wh.style.display = tt === 'webhook_received' ? 'block' : 'none';
@@ -847,7 +1074,10 @@
         else if (tt === 'webhook_received') data.trigger_value = document.getElementById('p-trigger-webhook')?.value || '';
         else if (tt === 'contact_created') data.trigger_value = document.getElementById('p-trigger-source')?.value || '*';
         else if (tt === 'ltv_inactive') data.trigger_value = 'default';
+        data.cooldown_mode = document.getElementById('p-trigger-cooldown')?.value || 'none';
+        data.sync_pipeline_on_enter = document.getElementById('p-trigger-sync-pipeline')?.checked ? 1 : 0;
       } else if (type === 'flow_condition') {
+        data.pipeline_id = parseInt(document.getElementById('p-cond-pipeline')?.value || '0', 10) || 0;
         data.require_tag = document.getElementById('p-require-tag')?.value?.trim() || '';
         data.exclude_tag = document.getElementById('p-exclude-tag')?.value?.trim() || '';
         data.stage_is = document.getElementById('p-stage-is')?.value || '';
@@ -873,12 +1103,21 @@
         data.pct_a = parseInt(document.getElementById('p-pct-a')?.value, 10) || 50;
       } else if (type === 'flow_delay') {
         data.delay_minutes = parseInt(document.getElementById('p-delay')?.value, 10) || 5;
+      } else if (type === 'flow_wait_reply') {
+        data.timeout_hours = parseInt(document.getElementById('p-wait-hours')?.value, 10) || 24;
+        data.keyword_contains = document.getElementById('p-wait-keyword')?.value?.trim() || '';
       } else if (type === 'flow_message') {
         data.connection_id = parseInt(msgConnectionPicker?.getValue() || '0', 10) || 0;
         data.agent_id = parseInt(msgAgentPicker?.getValue() || '0', 10) || 0;
         data.message = document.getElementById('p-msg-text')?.value || '';
         const prev = document.getElementById('p-msg-preview');
         if (prev) prev.textContent = previewMessageClient(data.message) || '—';
+      } else if (type === 'flow_agent') {
+        data.connection_id = parseInt(agentNodeConnectionPicker?.getValue() || '0', 10) || 0;
+        data.agent_id = parseInt(agentNodeAgentPicker?.getValue() || '0', 10) || 0;
+        data.mode = document.getElementById('p-agent-mode')?.value || 'respond';
+        data.mission = document.getElementById('p-agent-mission')?.value?.trim() || '';
+        data.label = 'Agente IA';
       } else if (type === 'flow_action') {
         data.action_type = actionTypePicker?.getValue() || 'assign_agent';
         syncActionFieldsToData(data);
@@ -886,6 +1125,7 @@
 
       editor.updateNodeDataFromId(nodeId, data);
       refreshNodeVisual(nodeId);
+      updateFlowRoutingSummary();
     };
 
     if (type === 'flow_trigger') {
@@ -902,6 +1142,23 @@
 
     if (type === 'flow_condition') {
       condAgentPicker = mountAgentPickerEl('picker-cond-agent', d.agent_id || 0, () => apply(), 'lead');
+      const condPipe = document.getElementById('p-cond-pipeline');
+      if (condPipe) {
+        condPipe.addEventListener('change', () => {
+          const np = parseInt(condPipe.value, 10) || getFlowPipelineId();
+          const stIs = document.getElementById('p-stage-is');
+          const stNot = document.getElementById('p-stage-not');
+          if (stIs) {
+            const cur = stIs.value;
+            stIs.innerHTML = '<option value="">— Qualquer —</option>' + stageOptionsForPipeline(np, cur);
+          }
+          if (stNot) {
+            const cur = stNot.value;
+            stNot.innerHTML = '<option value="">— Ignorar —</option>' + stageOptionsForPipeline(np, cur);
+          }
+          apply();
+        });
+      }
     }
 
     if (type === 'flow_message') {
@@ -909,6 +1166,13 @@
       const defaultAg = d.agent_id || (B.agents && B.agents[0] ? B.agents[0].id : 0);
       msgConnectionPicker = mountConnectionPickerEl('picker-msg-connection', defaultConn, () => apply(), false);
       msgAgentPicker = mountAgentPickerEl('picker-msg-agent', defaultAg, () => apply(), 'assign');
+    }
+
+    if (type === 'flow_agent') {
+      const defaultConn = d.connection_id || (B.whatsappConnections && B.whatsappConnections[0] ? B.whatsappConnections[0].id : 0);
+      const defaultAg = d.agent_id || (B.agents && B.agents[0] ? B.agents[0].id : 0);
+      agentNodeConnectionPicker = mountConnectionPickerEl('picker-agent-connection', defaultConn, () => apply(), false);
+      agentNodeAgentPicker = mountAgentPickerEl('picker-agent-brain', defaultAg, () => apply(), 'assign');
     }
 
     if (type === 'flow_action') {
@@ -926,6 +1190,7 @@
     });
 
     bindVarChips(document.getElementById('flow-props-body'));
+    bindVarChips(document.getElementById('p-agent-mission')?.parentElement);
     const msgTa = document.getElementById('p-msg-text');
     if (msgTa) {
       const upd = () => {
@@ -978,7 +1243,9 @@
     } else if (t === 'assign_agent') {
       h = propsField('Agente responsável', '<div class="auv-picker" id="picker-action-agent"></div>');
     } else if (t === 'move_stage') {
-      h = propsField('Estágio destino', `<select class="auv-input auv-native-select p-f-stage">${stageOptions(d.stage)}</select>`);
+      const pid = parseInt(d.pipeline_id, 10) || 0;
+      h = propsField('Funil destino', `<select class="auv-input auv-native-select p-f-pipeline">${pipelineOptionsHtml(pid)}</select>`, 'O lead será movido para este funil antes de trocar o estágio');
+      h += propsField('Estágio destino', `<select class="auv-input auv-native-select p-f-stage">${stageOptionsForPipeline(pid, d.stage)}</select>`);
     } else if (t === 'add_tag' || t === 'remove_tag') {
       h = propsField('Nome da tag', `<input class="auv-input p-f-tag" value="${esc(d.tag || '')}" placeholder="nome-da-tag">`);
     } else if (t === 'pause_ai' || t === 'resume_ai') {
@@ -1013,6 +1280,15 @@
     }
     wrap.innerHTML = h;
     bindVarChips(wrap);
+    const pipeSel = wrap.querySelector('.p-f-pipeline');
+    const stageSel = wrap.querySelector('.p-f-stage');
+    if (pipeSel && stageSel && t === 'move_stage') {
+      pipeSel.addEventListener('change', () => {
+        const np = parseInt(pipeSel.value, 10) || getFlowPipelineId();
+        stageSel.innerHTML = stageOptionsForPipeline(np, stageSel.value);
+        apply();
+      });
+    }
     const needsAgent = ['send_whatsapp', 'invoke_agent', 'assign_agent', 'pause_ai', 'resume_ai'].includes(t);
     if (t === 'send_whatsapp' && document.getElementById('picker-action-connection')) {
       const defaultConn = d.connection_id || (B.whatsappConnections && B.whatsappConnections[0] ? B.whatsappConnections[0].id : 0);
@@ -1040,6 +1316,8 @@
     if (msg) data.message = msg.value;
     const st = document.querySelector('.p-f-stage');
     if (st) data.stage = st.value;
+    const pipe = document.querySelector('.p-f-pipeline');
+    if (pipe) data.pipeline_id = parseInt(pipe.value, 10) || 0;
     const tag = document.querySelector('.p-f-tag');
     if (tag) data.tag = tag.value.trim();
     const mins = document.querySelector('.p-f-mins');
@@ -1093,13 +1371,16 @@
     const res = await fetch(API + '?action=crm_get_flow&id=' + id);
     const d = await res.json();
     if (d.error || !d.flow) {
-      alert(d.message || 'Erro ao carregar');
+      window.toast?.(d.message || 'Erro ao carregar', 'error');
       return;
     }
     currentFlowId = id;
+    await loadFlowNodeStats(id);
+    await loadFlowNodeErrors(id);
     const f = d.flow;
     document.getElementById('flow-name').value = f.name || '';
     document.getElementById('flow-active').checked = f.is_active == 1;
+    updateFlowPublishHint();
     const pipeSel = document.getElementById('flow-pipeline');
     if (pipeSel && f.pipeline_id) {
       pipeSel.value = String(f.pipeline_id);
@@ -1118,34 +1399,39 @@
     selectedNodeId = null;
     renderPropsPanel(null);
     loadFlowList();
+    updateFlowRoutingSummary();
+  }
+
+  function syncOpenPropsToEditor() {
+    const body = document.getElementById('flow-props-body');
+    if (!body || !selectedNodeId) return;
+    body.querySelectorAll('input, select, textarea').forEach((el) => {
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+  }
+
+  function updateFlowPublishHint() {
+    const active = document.getElementById('flow-active');
+    const hint = document.getElementById('flow-publish-hint');
+    if (!hint || !active) return;
+    if (active.checked) {
+      hint.textContent = 'Publicado — dispara no WhatsApp';
+      hint.hidden = false;
+      hint.style.color = '#047857';
+      hint.style.background = '#ecfdf5';
+      hint.style.borderColor = '#6ee7b7';
+    } else {
+      hint.textContent = 'Rascunho — salve e publique quando estiver pronto';
+      hint.hidden = false;
+      hint.style.color = '#b45309';
+      hint.style.background = '#fffbeb';
+      hint.style.borderColor = '#fcd34d';
+    }
   }
 
   async function saveCurrentFlow() {
-    if (!editor) return;
-    const name = document.getElementById('flow-name')?.value?.trim() || 'Nova automação';
-    const isActive = document.getElementById('flow-active')?.checked ? 1 : 0;
-    const exported = editor.export();
-    const fd = new FormData();
-    fd.append('csrf_token', CSRF);
-    fd.append('action', 'crm_save_flow');
-    if (currentFlowId) fd.append('id', currentFlowId);
-    fd.append('name', name);
-    fd.append('flow_data', JSON.stringify(exported));
-    fd.append('is_active', String(isActive));
-    fd.append('pipeline_id', String(getFlowPipelineId()));
-    const res = await fetch(API, { method: 'POST', body: fd });
-    const d = await res.json();
-    if (d.error) return alert(d.message || 'Erro ao salvar');
-    if (d.id && !currentFlowId) {
-      currentFlowId = d.id;
-      await loadFlow(d.id);
-    }
-    loadFlowList();
-    if (typeof window.loadDedupeWarnings === 'function') window.loadDedupeWarnings();
-    const btn = document.getElementById('btn-flow-saved');
-    if (btn) {
-      btn.textContent = 'Salvo ✓';
-      setTimeout(() => { btn.textContent = 'Salvar'; }, 2000);
+    if (typeof window.saveCurrentFlowDraft === 'function') {
+      return window.saveCurrentFlowDraft(false);
     }
   }
 
@@ -1185,9 +1471,7 @@
     return pipelineSlugs[0] || slug;
   }
 
-  function remapFlowExportStages(exp, pipelineId) {
-    const slugs = pipelineStageSlugs(pipelineId);
-    const remap = buildStageRemap(slugs);
+  function remapFlowExportStages(exp, flowPipelineId) {
     const nodes = exp?.drawflow?.drawflow?.Home?.data;
     if (!nodes || typeof nodes !== 'object') return { export: exp, changed: false };
     let changed = false;
@@ -1196,11 +1480,21 @@
       if (!node || !node.data) return;
       const d = node.data;
       const name = node.name || '';
+      let targetPid = flowPipelineId;
+      if (name === 'flow_condition' || (name === 'flow_action' && d.action_type === 'move_stage')) {
+        targetPid = parseInt(d.pipeline_id, 10) || flowPipelineId;
+      }
+      const slugs = pipelineStageSlugs(targetPid);
+      const remap = buildStageRemap(slugs);
+
       if (name === 'flow_trigger' && d.trigger_type === 'stage_enter' && d.trigger_value) {
-        const next = remapStageSlug(String(d.trigger_value), remap, slugs);
+        const flowSlugs = pipelineStageSlugs(flowPipelineId);
+        const flowRemap = buildStageRemap(flowSlugs);
+        const flowLabels = stagesForPipeline(flowPipelineId);
+        const next = remapStageSlug(String(d.trigger_value), flowRemap, flowSlugs);
         if (next !== d.trigger_value) {
           d.trigger_value = next;
-          d._preview = 'Estágio <strong>' + esc(flowStages()[next] || next) + '</strong>';
+          d._preview = 'Estágio <strong>' + esc(flowLabels[next] || next) + '</strong>';
           changed = true;
         }
       }
@@ -1330,27 +1624,67 @@
     } catch (e) {}
   }
 
+  function addWhatsAppJourney() {
+    if (!editor) return;
+    editor.clear();
+    const t1 = addNode('flow_trigger', 80, 120);
+    const a1 = addNode('flow_agent', 320, 100);
+    const w1 = addNode('flow_wait_reply', 560, 100);
+    const c1 = addNode('flow_action', 800, 60, { action_type: 'add_tag', tag: 'qualificado', label: 'Tag qualificado' });
+    const c2 = addNode('flow_action', 800, 180, { action_type: 'add_tag', tag: 'sem-resposta', label: 'Tag timeout' });
+    if (t1 && a1) editor.addConnection(t1, a1, 'output_1', 'input_1');
+    if (a1 && w1) editor.addConnection(a1, w1, 'output_1', 'input_1');
+    if (w1 && c1) editor.addConnection(w1, c1, 'output_1', 'input_1');
+    if (w1 && c2) editor.addConnection(w1, c2, 'output_2', 'input_1');
+    document.getElementById('flow-name').value = 'Jornada WhatsApp';
+    window.toast?.('Jornada criada — configure agente e publique', 'info');
+  }
+
   function bindUi() {
     document.getElementById('btn-new-flow')?.addEventListener('click', newFlow);
     document.getElementById('flow-template-close')?.addEventListener('click', closeTemplateModal);
     document.querySelector('#flow-template-modal .flow-modal-backdrop')?.addEventListener('click', closeTemplateModal);
-    document.getElementById('btn-flow-save')?.addEventListener('click', saveCurrentFlow);
     document.getElementById('btn-flow-delete')?.addEventListener('click', deleteCurrentFlow);
-    document.querySelectorAll('[data-add-node]').forEach((btn) => {
+    function bindPaletteBtn(btn) {
       btn.addEventListener('click', () => {
+        if (btn.id === 'btn-palette-more') {
+          const extra = document.getElementById('flow-palette-extra');
+          if (extra) extra.hidden = !extra.hidden;
+          return;
+        }
         const t = btn.getAttribute('data-add-node');
+        if (!t) return;
+        let preset = null;
+        const presetRaw = btn.getAttribute('data-add-preset');
+        if (presetRaw) {
+          try {
+            preset = JSON.parse(presetRaw);
+          } catch (e) {}
+        }
         const cx = 200 + Math.random() * 200;
         const cy = 100 + Math.random() * 120;
-        const id = addNode(t, cx, cy);
-        if (id) editor.selectNode(id);
+        const id = addNode(t, cx, cy, preset);
+        if (id) {
+          editor.selectNode(id);
+          updateFlowRoutingSummary();
+        }
       });
-    });
+    }
+    document.querySelectorAll('[data-add-node], #btn-palette-more').forEach(bindPaletteBtn);
     document.getElementById('zoom-in')?.addEventListener('click', () => editor.zoom_in());
     document.getElementById('zoom-out')?.addEventListener('click', () => editor.zoom_out());
     document.getElementById('zoom-reset')?.addEventListener('click', () => editor.zoom_reset());
   }
 
   window.loadFlowList = loadFlowList;
+  window.loadFlow = loadFlow;
+  window.newFlowBlank = newFlowBlank;
+  window.addWhatsAppJourney = addWhatsAppJourney;
+  window.getCurrentFlowId = () => currentFlowId;
+  window.getCurrentFlowExport = () => (editor ? editor.export() : null);
+  window.getFlowPipelineId = getFlowPipelineId;
+  window.syncOpenPropsToEditor = syncOpenPropsToEditor;
+  window.updateFlowPublishHint = updateFlowPublishHint;
 
   window.initAutomacoesFlow = async function () {
     initEditor();
@@ -1370,25 +1704,17 @@
   window.pipelineStageSlugs = pipelineStageSlugs;
 
   window.setAutomacoesPageTab = function (tab) {
-    const connections = document.getElementById('panel-connections');
     const visual = document.getElementById('panel-visual');
     const quick = document.getElementById('panel-quick-rules');
-    const tConn = document.getElementById('tab-connections');
     const t1 = document.getElementById('tab-visual');
     const t2 = document.getElementById('tab-quick');
-    const showConn = tab === 'connections';
     const showQuick = tab === 'quick';
-    if (connections) connections.style.display = showConn ? 'block' : 'none';
-    if (visual) visual.style.display = !showConn && !showQuick ? 'block' : 'none';
+    if (visual) visual.style.display = showQuick ? 'none' : 'block';
     if (quick) quick.style.display = showQuick ? 'block' : 'none';
-    tConn?.classList.toggle('active', showConn);
-    t1?.classList.toggle('active', !showConn && !showQuick);
+    t1?.classList.toggle('active', !showQuick);
     t2?.classList.toggle('active', showQuick);
-    if (!showConn && !showQuick && typeof window.ensureFlowEditorInit === 'function') {
+    if (!showQuick && typeof window.ensureFlowEditorInit === 'function') {
       window.ensureFlowEditorInit();
-    }
-    if (showConn && typeof window.auvvoEvolutionConnect?.refreshSelection === 'function') {
-      window.auvvoEvolutionConnect.refreshSelection();
     }
   };
 })();

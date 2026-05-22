@@ -67,13 +67,19 @@ export async function processOneAiJob() {
     const failed = attempts >= config.maxAttempts;
     const backoff = [5, 30, 120][attempts - 1] || 300;
 
+    const errMsg = (data.error || `http_${status}`).slice(0, 500);
+    const lastError =
+      data.error === 'invalid_signature'
+        ? 'invalid_signature — defina WORKER_HMAC_SECRET igual no .env do PHP (Hostinger) e do worker Node'
+        : errMsg;
+
     await conn.query(
       `UPDATE auvvo_ai_jobs SET status = ?, attempts = ?, last_error = ?,
        next_retry_at = IF(?, DATE_ADD(NOW(), INTERVAL ? SECOND), NULL), updated_at = NOW() WHERE id = ?`,
       [
         failed ? 'failed' : 'pending',
         attempts,
-        (data.error || `http_${status}`).slice(0, 500),
+        lastError,
         failed ? 0 : 1,
         backoff,
         jobId,

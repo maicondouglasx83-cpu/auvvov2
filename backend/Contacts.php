@@ -52,7 +52,7 @@ class Contacts
     /**
      * @return array{id:int,is_new:bool}|false
      */
-    public function upsertFromWebhook(int $user_id, int $agent_id, string $jid, string $push_name = ''): array|false
+    public function upsertFromWebhook(int $user_id, int $agent_id, string $jid, string $push_name = '', int $connection_id = 0): array|false
     {
         if (auvvo_is_whatsapp_group_jid($jid)) {
             return false;
@@ -84,13 +84,17 @@ class Contacts
             $id = (int) ($stmt->fetchColumn() ?: 0);
 
             if ($id > 0 && $isNew) {
-                $pid = $this->pipelines()->defaultPipelineId($user_id);
+                require_once __DIR__ . '/whatsapp_connections.inc.php';
+                $pid = $connection_id > 0
+                    ? auvvo_whatsapp_resolve_inbound_pipeline_id($this->pdo, $user_id, $connection_id)
+                    : $this->pipelines()->defaultPipelineId($user_id);
                 $slug = $this->pipelines()->firstStageSlug($pid);
                 $this->pipelines()->syncContactStage($id, $pid, $slug);
             }
 
             return $id > 0 ? ['id' => $id, 'is_new' => $isNew] : false;
         } catch (PDOException $e) {
+            error_log('[Contacts] upsertFromWebhook: ' . $e->getMessage());
             return false;
         }
     }

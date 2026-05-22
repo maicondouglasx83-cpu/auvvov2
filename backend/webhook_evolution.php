@@ -318,12 +318,15 @@ if ($event_type === 'MESSAGE' && !($data['Info']['IsFromMe'] ?? true)) {
     if ($routingAgentId <= 0 && !empty($connection['_legacy_agent_row'])) {
         $routingAgentId = (int) $connection['id'];
     }
+    if ($routingAgentId <= 0) {
+        $routingAgentId = auvvo_whatsapp_resolve_routing_agent_id($pdo, $user_id_conn, $connection_id, $connection);
+    }
     $agent = $routingAgentId > 0
         ? auvvo_whatsapp_load_agent_brain($pdo, $user_id_conn, $routingAgentId)
         : null;
     if (!$agent) {
         auvvo_webhook_tracelog('skip', ['reason' => 'no_brain_agent', 'connection_id' => $connection_id]);
-        http_response_code(200); echo '{"ok":true,"info":"no agent configured for this connection"}'; exit;
+        http_response_code(200); echo '{"ok":true,"info":"no agent configured for this connection — defina agente padrão em Conexões ou publique um fluxo com agente"}'; exit;
     }
 
     $agent = auvvo_whatsapp_attach_connection_to_agent($agent, $connection);
@@ -352,7 +355,7 @@ if ($event_type === 'MESSAGE' && !($data['Info']['IsFromMe'] ?? true)) {
     try {
         require_once 'Contacts.php';
         $crm = new Contacts($pdo);
-        $upsert = $crm->upsertFromWebhook((int) $agent['user_id'], (int) $agent['id'], $canonical_jid, (string) $push_name);
+        $upsert = $crm->upsertFromWebhook((int) $agent['user_id'], (int) $agent['id'], $canonical_jid, (string) $push_name, $connection_id);
         if (is_array($upsert) && !empty($upsert['id'])) {
             $contactRow = $crm->get((int) $agent['user_id'], (int) $upsert['id']);
             if ($contactRow) {
@@ -380,7 +383,18 @@ if ($event_type === 'MESSAGE' && !($data['Info']['IsFromMe'] ?? true)) {
                 }
             }
         }
-    } catch (Throwable $_crmEx) {}
+    } catch (Throwable $_crmEx) {
+        error_log('[Evolution] CRM/automation: ' . $_crmEx->getMessage());
+        auvvo_webhook_tracelog('crm_error', ['message' => $_crmEx->getMessage()]);
+    }
+
+    require_once __DIR__ . '/crm_flow_agent.inc.php';
+    if (auvvo_automation_ai_was_handled()) {
+        auvvo_webhook_tracelog('exit', ['reason' => 'flow_agent_handled']);
+        http_response_code(200);
+        echo '{"ok":true,"info":"ai handled by flow agent node"}';
+        exit;
+    }
 
     // Chaves de LLM, ElevenLabs e contexto da empresa + preferências de agenda
     $stmt = $pdo->prepare("SELECT openai_key, gemini_key, elevenlabs_key, company_name, company_niche, company_site, google_calendar_enabled, google_calendar_calendar_id FROM settings WHERE user_id=?");

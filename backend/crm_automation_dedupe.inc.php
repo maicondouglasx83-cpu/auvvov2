@@ -123,6 +123,81 @@ function auvvo_crm_dedupe_should_skip_source(
 }
 
 /**
+ * Cooldown opcional no nó Início para whatsapp_message (once_per_day).
+ *
+ * @param array<string, array> $nodes
+ */
+function auvvo_flow_trigger_cooldown_skip(
+    PDO $pdo,
+    int $userId,
+    int $flowId,
+    array $nodes,
+    string $triggerNodeId,
+    array $contact,
+    string $triggerType
+): bool {
+    if ($triggerType !== 'whatsapp_message') {
+        return false;
+    }
+    $node = $nodes[$triggerNodeId] ?? null;
+    if (!is_array($node)) {
+        return false;
+    }
+    $data = is_array($node['data'] ?? null) ? $node['data'] : [];
+    $mode = (string) ($data['cooldown_mode'] ?? 'none');
+    if ($mode === 'none' || $mode === '') {
+        return false;
+    }
+    $contactId = (int) ($contact['id'] ?? 0);
+    if ($contactId <= 0) {
+        return false;
+    }
+    $key = 'flow:' . $flowId . ':cooldown:' . $mode;
+    if ($mode === 'once_per_day') {
+        $key .= ':' . date('Y-m-d');
+    }
+
+    return auvvo_crm_dedupe_is_blocked($pdo, $userId, $contactId, null, $key);
+}
+
+/**
+ * Marca cooldown após fluxo disparar.
+ *
+ * @param array<string, array> $nodes
+ */
+function auvvo_flow_trigger_cooldown_mark(
+    PDO $pdo,
+    int $userId,
+    int $flowId,
+    array $nodes,
+    string $triggerNodeId,
+    array $contact,
+    string $triggerType
+): void {
+    if ($triggerType !== 'whatsapp_message') {
+        return;
+    }
+    $node = $nodes[$triggerNodeId] ?? null;
+    if (!is_array($node)) {
+        return;
+    }
+    $data = is_array($node['data'] ?? null) ? $node['data'] : [];
+    $mode = (string) ($data['cooldown_mode'] ?? 'none');
+    if ($mode === 'none' || $mode === '') {
+        return;
+    }
+    $contactId = (int) ($contact['id'] ?? 0);
+    if ($contactId <= 0) {
+        return;
+    }
+    $key = 'flow:' . $flowId . ':cooldown:' . $mode;
+    if ($mode === 'once_per_day') {
+        $key .= ':' . date('Y-m-d');
+    }
+    auvvo_crm_dedupe_mark($pdo, $userId, $contactId, null, $key);
+}
+
+/**
  * @param 'rule'|'flow' $sourceType
  */
 function auvvo_crm_dedupe_mark_source(

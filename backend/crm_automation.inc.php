@@ -6,6 +6,7 @@ require_once __DIR__ . '/crm_automation_dedupe.inc.php';
 require_once __DIR__ . '/evolution_resolve.inc.php';
 require_once __DIR__ . '/webhook_engine.inc.php';
 require_once __DIR__ . '/crm_automation_motor.inc.php';
+require_once __DIR__ . '/crm_automation_runs.inc.php';
 
 /**
  * Condições do fluxo/regra (tags, estágio, agente, palavra-chave, A/B).
@@ -38,11 +39,19 @@ function auvvo_crm_contact_passes_conditions(array $config, array $contact, arra
     }
 
     $stageIs = trim((string) ($config['stage_is'] ?? ''));
+    $stageNot = trim((string) ($config['stage_not'] ?? ''));
+    $condPipelineId = (int) ($config['pipeline_id'] ?? 0);
+    if ($condPipelineId > 0 && ($stageIs !== '' || $stageNot !== '')) {
+        $contactPipelineId = (int) ($contact['pipeline_id'] ?? 0);
+        if ($contactPipelineId !== $condPipelineId) {
+            return false;
+        }
+    }
+
     if ($stageIs !== '' && (string) ($contact['stage'] ?? '') !== $stageIs) {
         return false;
     }
 
-    $stageNot = trim((string) ($config['stage_not'] ?? ''));
     if ($stageNot !== '' && (string) ($contact['stage'] ?? '') === $stageNot) {
         return false;
     }
@@ -284,14 +293,45 @@ function auvvo_crm_execute_action(
             'trigger_value' => $triggerValue,
         ];
     }
+
+    if (auvvo_automation_is_simulate($context)) {
+        $detail = auvvo_automation_simulate_action_detail($actionType, $config, $contact, $pdo, $userId, $context);
+        auvvo_automation_run_log_step(
+            $pdo,
+            $context,
+            (string) ($config['_node_id'] ?? 'action'),
+            'flow_action',
+            (string) ($config['_node_label'] ?? $actionType),
+            'simulated',
+            $detail
+        );
+
+        return;
+    }
+
     switch ($actionType) {
         case 'move_stage':
             $stage = trim((string) ($config['stage'] ?? ''));
             if ($stage === '' || empty($contact['id'])) {
                 break;
             }
+            $pipelineId = (int) ($config['pipeline_id'] ?? 0);
+            require_once __DIR__ . '/CrmPipelines.php';
             require_once __DIR__ . '/Contacts.php';
-            (new Contacts($pdo))->save($userId, ['id' => (int) $contact['id'], 'stage' => $stage]);
+            $pipes = new CrmPipelines($pdo);
+            if ($pipelineId <= 0) {
+                $pipelineId = (int) ($contact['pipeline_id'] ?? 0);
+            }
+            if ($pipelineId <= 0) {
+                $pipelineId = $pipes->defaultPipelineId($userId);
+            }
+            $contactRef = $contact;
+            auvvo_crm_sync_contact_to_pipeline($pdo, $userId, $contactRef, $pipelineId);
+            $pipes->syncContactStage((int) $contact['id'], $pipelineId, $stage);
+            $fresh = (new Contacts($pdo))->get($userId, (int) $contact['id']);
+            if ($fresh) {
+                $contact = $fresh;
+            }
             break;
 
         case 'assign_agent':
@@ -754,20 +794,33 @@ function auvvo_crm_run_automations(
         $context = auvvo_crm_build_trigger_context($triggerType, $triggerValue, $context);
     }
     $contactPipelineId = (int) ($contact['pipeline_id'] ?? 0);
+    $skipPipelineFilter = auvvo_crm_trigger_skips_pipeline_filter($triggerType);
 
     try {
-        $stmt = $pdo->prepare(
-            'SELECT * FROM crm_automations WHERE user_id = ? AND is_active = 1 AND trigger_type = ?
-             AND (trigger_value = ? OR trigger_value = ?)
-             AND (pipeline_id IS NULL OR pipeline_id = 0 OR pipeline_id = ?)'
-        );
-        $stmt->execute([$userId, $triggerType, $triggerValue, '*', $contactPipelineId]);
+        if ($skipPipelineFilter) {
+            $stmt = $pdo->prepare(
+                'SELECT * FROM crm_automations WHERE user_id = ? AND is_active = 1 AND trigger_type = ?
+                 AND (trigger_value = ? OR trigger_value = ?)'
+            );
+            $stmt->execute([$userId, $triggerType, $triggerValue, '*']);
+        } else {
+            $stmt = $pdo->prepare(
+                'SELECT * FROM crm_automations WHERE user_id = ? AND is_active = 1 AND trigger_type = ?
+                 AND (trigger_value = ? OR trigger_value = ?)
+                 AND (pipeline_id IS NULL OR pipeline_id = 0 OR pipeline_id = ?)'
+            );
+            $stmt->execute([$userId, $triggerType, $triggerValue, '*', $contactPipelineId]);
+        }
         $rules = $stmt->fetchAll(PDO::FETCH_ASSOC);
     } catch (PDOException $e) {
         return;
     }
 
     foreach ($rules as $rule) {
+        $rulePipelineId = (int) ($rule['pipeline_id'] ?? 0);
+        if ($rulePipelineId > 0 && $skipPipelineFilter) {
+            auvvo_crm_sync_contact_to_pipeline($pdo, $userId, $contact, $rulePipelineId);
+        }
         auvvo_crm_schedule_rule($pdo, $userId, $rule, $contact, $triggerType, $triggerValue, $context);
     }
 
@@ -858,6 +911,9 @@ function auvvo_crm_process_automation_queue(PDO $pdo, int $limit = 25): int
                     (string) $row['trigger_type'],
                     (string) $row['trigger_value']
                 );
+            } elseif ($actionType === 'flow_wait_timeout') {
+                require_once __DIR__ . '/crm_flow_wait_reply.inc.php';
+                auvvo_flow_wait_timeout_from_queue($pdo, $userId, $actionConfig, $contact);
             } else {
                 auvvo_crm_execute_action(
                     $pdo,

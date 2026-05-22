@@ -1107,6 +1107,7 @@ switch ($action) {
 
     case 'crm_save_flow': {
         require_once __DIR__ . '/migrations.php';
+        require_once __DIR__ . '/crm_flow_validation.inc.php';
         auvvo_run_migrations($pdo);
         $id = (int) ($_POST['id'] ?? 0);
         $name = trim($_POST['name'] ?? 'Nova automação');
@@ -1119,6 +1120,7 @@ switch ($action) {
             $flowData = json_encode($flowData, JSON_UNESCAPED_UNICODE);
         }
         $isActive = (int) ($_POST['is_active'] ?? 0) ? 1 : 0;
+        $forcePublish = in_array(strtolower(trim((string) ($_POST['force_publish'] ?? '0'))), ['1', 'true', 'yes'], true);
         $pipelineId = (int) ($_POST['pipeline_id'] ?? 0);
         require_once __DIR__ . '/CrmPipelines.php';
         $pipes = new CrmPipelines($pdo);
@@ -1131,17 +1133,63 @@ switch ($action) {
                 json_out(['error' => true, 'message' => 'Pipeline inválido.']);
             }
         }
+        if ($isActive) {
+            $validation = auvvo_flow_validate_graph($pdo, $user_id, (string) $flowData, true);
+            if (!$validation['valid'] && !$forcePublish) {
+                json_out([
+                    'error' => true,
+                    'message' => 'Corrija os erros antes de publicar',
+                    'validation' => $validation,
+                    'publish_blocked' => true,
+                ]);
+            }
+        }
         if ($id > 0) {
             $pdo->prepare(
                 'UPDATE crm_automation_flows SET pipeline_id=?, name=?, description=?, flow_data=?, is_active=? WHERE id=? AND user_id=?'
             )->execute([$pipelineId, $name, $description, $flowData, $isActive, $id, $user_id]);
-            json_out(['error' => false, 'id' => $id, 'pipeline_id' => $pipelineId]);
+            json_out(['error' => false, 'id' => $id, 'pipeline_id' => $pipelineId, 'is_active' => $isActive]);
         } else {
             $pdo->prepare(
                 'INSERT INTO crm_automation_flows (user_id, pipeline_id, name, description, flow_data, is_active) VALUES (?,?,?,?,?,?)'
             )->execute([$user_id, $pipelineId, $name, $description, $flowData, $isActive]);
-            json_out(['error' => false, 'id' => (int) $pdo->lastInsertId(), 'pipeline_id' => $pipelineId]);
+            json_out(['error' => false, 'id' => (int) $pdo->lastInsertId(), 'pipeline_id' => $pipelineId, 'is_active' => $isActive]);
         }
+    }
+
+    case 'crm_flow_publish_checklist': {
+        require_once __DIR__ . '/migrations.php';
+        require_once __DIR__ . '/crm_flow_validation.inc.php';
+        auvvo_run_migrations($pdo);
+        $flowId = (int) ($_GET['flow_id'] ?? $_POST['flow_id'] ?? 0);
+        $flowData = $_POST['flow_data'] ?? null;
+        if (is_array($flowData)) {
+            $flowData = json_encode($flowData, JSON_UNESCAPED_UNICODE);
+        }
+        if (($flowData === null || $flowData === '') && $flowId > 0) {
+            $st = $pdo->prepare('SELECT flow_data FROM crm_automation_flows WHERE id = ? AND user_id = ? LIMIT 1');
+            $st->execute([$flowId, $user_id]);
+            $flowData = (string) ($st->fetchColumn() ?: '{}');
+        }
+        json_out([
+            'error' => false,
+            'checklist' => auvvo_flow_publish_checklist($pdo, $user_id, (string) ($flowData ?? '{}'), $flowId),
+        ]);
+    }
+
+    case 'crm_flow_validate': {
+        require_once __DIR__ . '/migrations.php';
+        require_once __DIR__ . '/crm_flow_validation.inc.php';
+        auvvo_run_migrations($pdo);
+        $flowData = $_POST['flow_data'] ?? '{}';
+        if (is_array($flowData)) {
+            $flowData = json_encode($flowData, JSON_UNESCAPED_UNICODE);
+        }
+        $forPublish = in_array(strtolower(trim((string) ($_POST['for_publish'] ?? '1'))), ['1', 'true', 'yes'], true);
+        json_out([
+            'error' => false,
+            'validation' => auvvo_flow_validate_graph($pdo, $user_id, (string) $flowData, $forPublish),
+        ]);
     }
 
     case 'crm_delete_flow': {
@@ -1160,6 +1208,107 @@ switch ($action) {
         $pdo->prepare('UPDATE crm_automation_flows SET is_active = ? WHERE id = ? AND user_id = ?')
             ->execute([$active, $id, $user_id]);
         json_out(['error' => false]);
+    }
+
+    case 'crm_simulate_flow': {
+        require_once __DIR__ . '/migrations.php';
+        require_once __DIR__ . '/crm_automation_runs.inc.php';
+        auvvo_run_migrations($pdo);
+        $flowId = (int) ($_POST['flow_id'] ?? 0);
+        $flowData = $_POST['flow_data'] ?? null;
+        if (is_array($flowData)) {
+            $flowData = json_encode($flowData, JSON_UNESCAPED_UNICODE);
+        }
+        $triggerType = trim((string) ($_POST['trigger_type'] ?? 'whatsapp_first'));
+        $triggerValue = trim((string) ($_POST['trigger_value'] ?? '*'));
+        $messageBody = trim((string) ($_POST['message_body'] ?? ''));
+        $connectionId = (int) ($_POST['connection_id'] ?? 0);
+        $contactId = (int) ($_POST['contact_id'] ?? 0);
+        $contactOverrides = [];
+        foreach (['name', 'phone', 'email', 'company', 'stage'] as $k) {
+            if (isset($_POST[$k]) && trim((string) $_POST[$k]) !== '') {
+                $contactOverrides[$k] = trim((string) $_POST[$k]);
+            }
+        }
+        if ($flowId <= 0 && ($flowData === null || $flowData === '' || $flowData === '{}')) {
+            json_out(['error' => true, 'message' => 'Informe flow_id ou flow_data']);
+        }
+        $useLlm = in_array(strtolower(trim((string) ($_POST['use_llm'] ?? '0'))), ['1', 'true', 'yes', 'on'], true);
+        $continueRunId = (int) ($_POST['continue_run_id'] ?? 0);
+        $result = auvvo_automation_simulate_flow(
+            $pdo,
+            $user_id,
+            $flowId,
+            is_string($flowData) ? $flowData : null,
+            $triggerType,
+            $triggerValue,
+            $messageBody,
+            $contactOverrides,
+            $contactId > 0 ? $contactId : null,
+            $connectionId,
+            $useLlm,
+            $continueRunId
+        );
+        json_out(array_merge(['error' => (bool) ($result['error'] ?? false)], $result));
+    }
+
+    case 'crm_list_runs': {
+        require_once __DIR__ . '/migrations.php';
+        require_once __DIR__ . '/crm_automation_runs.inc.php';
+        auvvo_run_migrations($pdo);
+        $flowId = (int) ($_GET['flow_id'] ?? 0);
+        $limit = (int) ($_GET['limit'] ?? 40);
+        $modeFilter = trim((string) ($_GET['mode'] ?? 'live'));
+        if (!in_array($modeFilter, ['live', 'simulate', 'all'], true)) {
+            $modeFilter = 'live';
+        }
+        if ($modeFilter === 'all') {
+            $modeFilter = '';
+        }
+        $runs = auvvo_automation_list_runs($pdo, $user_id, $flowId, $limit, $modeFilter);
+        json_out(['error' => false, 'runs' => $runs]);
+    }
+
+    case 'crm_get_run': {
+        require_once __DIR__ . '/migrations.php';
+        require_once __DIR__ . '/crm_automation_runs.inc.php';
+        auvvo_run_migrations($pdo);
+        $runId = (int) ($_GET['id'] ?? $_POST['id'] ?? 0);
+        if ($runId <= 0) {
+            json_out(['error' => true, 'message' => 'id obrigatório']);
+        }
+        $run = auvvo_automation_get_run($pdo, $user_id, $runId);
+        if (!$run) {
+            json_out(['error' => true, 'message' => 'Execução não encontrada']);
+        }
+        json_out(['error' => false, 'run' => $run]);
+    }
+
+    case 'crm_flow_node_stats': {
+        require_once __DIR__ . '/migrations.php';
+        require_once __DIR__ . '/crm_flow_agent.inc.php';
+        auvvo_run_migrations($pdo);
+        $flowId = (int) ($_GET['flow_id'] ?? 0);
+        if ($flowId <= 0) {
+            json_out(['error' => true, 'message' => 'flow_id obrigatório']);
+        }
+        $chk = $pdo->prepare('SELECT id FROM crm_automation_flows WHERE id = ? AND user_id = ? LIMIT 1');
+        $chk->execute([$flowId, $user_id]);
+        if (!$chk->fetchColumn()) {
+            json_out(['error' => true, 'message' => 'Fluxo não encontrado']);
+        }
+        json_out(['error' => false, 'stats' => auvvo_automation_node_stats($pdo, $user_id, $flowId)]);
+    }
+
+    case 'crm_flow_node_errors': {
+        require_once __DIR__ . '/migrations.php';
+        require_once __DIR__ . '/crm_flow_validation.inc.php';
+        auvvo_run_migrations($pdo);
+        $flowId = (int) ($_GET['flow_id'] ?? 0);
+        if ($flowId <= 0) {
+            json_out(['error' => true, 'message' => 'flow_id obrigatório']);
+        }
+        json_out(['error' => false, 'errors' => auvvo_flow_node_last_errors($pdo, $user_id, $flowId)]);
     }
 
     case 'crm_get_contact_by_jid': {

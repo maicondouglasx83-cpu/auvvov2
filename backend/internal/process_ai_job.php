@@ -44,6 +44,7 @@ function internal_verify_hmac(string $rawBody): bool
 
 $raw = file_get_contents('php://input') ?: '';
 if (!internal_verify_hmac($raw)) {
+    error_log('[Auvvo internal] HMAC inválido — confira WORKER_HMAC_SECRET ou DB_*/APP_BASE_URL iguais no PHP e no worker Node');
     internal_json(403, ['ok' => false, 'error' => 'invalid_signature']);
 }
 

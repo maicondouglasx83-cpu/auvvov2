@@ -22,6 +22,8 @@ export const config = {
 };
 
 export function workerHmacSecret() {
+  const explicit = (process.env.WORKER_HMAC_SECRET || '').trim();
+  if (explicit) return explicit;
   const material = [
     'auvvo-internal-worker-v1',
     config.db.password,

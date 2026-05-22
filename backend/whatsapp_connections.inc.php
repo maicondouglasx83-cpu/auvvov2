@@ -179,6 +179,117 @@ function auvvo_whatsapp_pick_brain_agent(PDO $pdo, int $userId, array $connectio
     return null;
 }
 
+/**
+ * Agente para rotear webhook quando a conexão não tem default_agent_id
+ * (usa agente dos fluxos ativos com gatilho/ação nesta linha).
+ */
+function auvvo_whatsapp_resolve_routing_agent_id(PDO $pdo, int $userId, int $connectionId, array $connection): int
+{
+    $defaultId = (int) ($connection['default_agent_id'] ?? 0);
+    if ($defaultId > 0) {
+        return $defaultId;
+    }
+    if (!empty($connection['_legacy_agent_row'])) {
+        return (int) $connection['id'];
+    }
+    if ($userId <= 0 || $connectionId <= 0) {
+        return 0;
+    }
+
+    require_once __DIR__ . '/crm_flow_engine.inc.php';
+
+    try {
+        $st = $pdo->prepare(
+            'SELECT flow_data FROM crm_automation_flows WHERE user_id = ? AND is_active = 1'
+        );
+        $st->execute([$userId]);
+        while ($row = $st->fetch(PDO::FETCH_ASSOC)) {
+            $nodes = auvvo_flow_parse_nodes((string) ($row['flow_data'] ?? ''));
+            $triggerOk = false;
+            foreach ($nodes as $node) {
+                $class = (string) ($node['class'] ?? '');
+                $data = is_array($node['data'] ?? null) ? $node['data'] : [];
+                if ($class === 'flow_trigger') {
+                    $tt = (string) ($data['trigger_type'] ?? '');
+                    if (!in_array($tt, ['whatsapp_first', 'whatsapp_message'], true)) {
+                        continue;
+                    }
+                    $tv = trim((string) ($data['trigger_value'] ?? '*'));
+                    if ($tv === '*' || $tv === (string) $connectionId || (int) $tv === $connectionId) {
+                        $triggerOk = true;
+                    }
+                }
+            }
+            if (!$triggerOk) {
+                continue;
+            }
+            foreach ($nodes as $node) {
+                $class = (string) ($node['class'] ?? '');
+                $data = is_array($node['data'] ?? null) ? $node['data'] : [];
+                if (!in_array($class, ['flow_action', 'flow_message'], true)) {
+                    continue;
+                }
+                $nodeConn = (int) ($data['connection_id'] ?? 0);
+                if ($nodeConn > 0 && $nodeConn !== $connectionId) {
+                    continue;
+                }
+                $ag = (int) ($data['agent_id'] ?? 0);
+                if ($ag > 0) {
+                    return $ag;
+                }
+            }
+        }
+    } catch (PDOException $e) {
+    }
+
+    return 0;
+}
+
+/** Funil destino para lead novo via WhatsApp (fluxo ativo desta linha ou padrão). */
+function auvvo_whatsapp_resolve_inbound_pipeline_id(PDO $pdo, int $userId, int $connectionId): int
+{
+    require_once __DIR__ . '/CrmPipelines.php';
+    require_once __DIR__ . '/crm_flow_engine.inc.php';
+
+    $pipes = new CrmPipelines($pdo);
+    $defaultId = $pipes->defaultPipelineId($userId);
+    if ($userId <= 0 || $connectionId <= 0) {
+        return $defaultId;
+    }
+
+    try {
+        $st = $pdo->prepare(
+            'SELECT pipeline_id, flow_data FROM crm_automation_flows
+             WHERE user_id = ? AND is_active = 1 AND pipeline_id IS NOT NULL AND pipeline_id > 0'
+        );
+        $st->execute([$userId]);
+        while ($row = $st->fetch(PDO::FETCH_ASSOC)) {
+            $pid = (int) ($row['pipeline_id'] ?? 0);
+            if ($pid <= 0) {
+                continue;
+            }
+            $nodes = auvvo_flow_parse_nodes((string) ($row['flow_data'] ?? ''));
+            foreach ($nodes as $node) {
+                if ((string) ($node['class'] ?? '') !== 'flow_trigger') {
+                    continue;
+                }
+                $data = is_array($node['data'] ?? null) ? $node['data'] : [];
+                $tt = (string) ($data['trigger_type'] ?? '');
+                if (!in_array($tt, ['whatsapp_first', 'whatsapp_message'], true)) {
+                    continue;
+                }
+                $tv = trim((string) ($data['trigger_value'] ?? '*'));
+                if ($tv === '*' || $tv === (string) $connectionId || (int) $tv === $connectionId) {
+                    return $pid;
+                }
+            }
+        }
+    } catch (PDOException $e) {
+    }
+
+    return $defaultId;
+}
+
 /** Injeta token/instance da conexão no row do agente (envio Evolution). */
 function auvvo_whatsapp_attach_connection_to_agent(array $agent, array $connection): array
 {

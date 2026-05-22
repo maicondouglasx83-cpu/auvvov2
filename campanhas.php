@@ -99,7 +99,7 @@ $campaigns = $stmt->fetchAll();
                                 <?php endforeach; ?>
                             </select>
                             <?php if (empty($whatsapp_connections)): ?>
-                            <p class="text-muted" style="font-size:.75rem;margin-top:6px">Crie uma conexão em <a href="automacoes">Automações → Conexões WhatsApp</a>.</p>
+                            <p class="text-muted" style="font-size:.875rem">Crie uma conexão em <a href="conexoes">Conexões WhatsApp</a>.</p>
                             <?php endif; ?>
                         </div>
 

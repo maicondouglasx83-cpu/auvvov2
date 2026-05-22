@@ -20,7 +20,7 @@ function sign(bodyStr) {
 let failed = 0;
 
 console.log('APP_BASE_URL:', config.appBaseUrl);
-console.log('HMAC secret: derived from DB + base URL\n');
+console.log('HMAC:', process.env.WORKER_HMAC_SECRET ? 'WORKER_HMAC_SECRET (explícito)' : 'derivado de DB + APP_BASE_URL');
 
 for (const ep of endpoints) {
   const bodyStr = JSON.stringify(ep.body);
@@ -45,7 +45,7 @@ for (const ep of endpoints) {
     } else if (res.status === 200 && text.includes('"ok":true')) {
       ok = true;
     } else if (res.status === 403) {
-      hint = '(HMAC inválido — confira DB_* e APP_BASE_URL iguais no PHP e no worker)';
+      hint = '(HMAC inválido — defina WORKER_HMAC_SECRET igual no .env do PHP e do worker, ou alinhe DB_* e APP_BASE_URL)';
     } else if (res.status === 404) {
       hint = '(arquivo não publicado no servidor)';
     }

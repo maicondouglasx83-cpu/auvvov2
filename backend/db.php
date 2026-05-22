@@ -78,6 +78,10 @@ define('APP_HTTP_PREFIX', auvvo_resolve_app_http_prefix());
  * Chave HMAC para POSTs internos (extensões futuras). Não é usada pelo Evolution. Derivada de DB_* + APP_BASE_URL.
  */
 function auvvo_worker_hmac_secret(): string {
+    $explicit = trim((string) ($_ENV['WORKER_HMAC_SECRET'] ?? ''));
+    if ($explicit !== '') {
+        return $explicit;
+    }
     $material = implode("\x1e", [
         'auvvo-internal-worker-v1',
         $_ENV['DB_PASS'] ?? '',
