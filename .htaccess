@@ -1,0 +1,21 @@
+RewriteEngine On
+
+# ----------------------------------------------------------
+# Friendly URLs: /dashboard -> dashboard.php
+# ----------------------------------------------------------
+
+# Don't rewrite existing files/folders
+RewriteCond %{REQUEST_FILENAME} -f [OR]
+RewriteCond %{REQUEST_FILENAME} -d
+RewriteRule ^ - [L]
+
+# Allow calling *.php directly (optional)
+RewriteRule \.php$ - [L]
+
+# Map single-segment routes to .php
+RewriteRule ^([a-zA-Z0-9_-]+)$ $1.php [L,QSA]
+
+<IfModule Litespeed>
+    RewriteEngine On
+    RewriteRule .* - [E=noabort:1, E=noconnectiontimeout:1]
+</IfModule>

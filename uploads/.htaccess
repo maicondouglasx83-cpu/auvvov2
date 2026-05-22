@@ -1,0 +1,9 @@
+# Bloqueia a execucao de scripts PHP e outros executaveis na pasta de uploads
+<FilesMatch "\.(php|php[34578]|phtml|pl|py|jsp|asp|sh|cgi)$">
+    Order Deny,Allow
+    Deny from all
+</FilesMatch>
+
+# Forca o download ou exibicao segura para arquivos comuns
+AddType text/plain .csv
+AddType text/plain .txt

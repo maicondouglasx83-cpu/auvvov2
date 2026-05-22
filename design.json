@@ -1,0 +1,210 @@
+{
+  "design_system": {
+    "meta": {
+      "name": "Auvvo AI SaaS Design System",
+      "style": "Dark Futuristic Glassmorphism with Pastel Glowing Accents",
+      "personality": "Cutting-edge, intelligent, ethereal, tech-forward but accessible",
+      "aesthetic_direction": "Inspired by Nexus Engineering's dark, complex workflow UIs, mixed with the soft, ethereal pastel gradients of the Auvvo brand. Surfaces are dark frosted glass floating over subtle blurred background meshes (Orchid Haze, Azure Mist). High contrast tech typography."
+    },
+    "color": {
+      "background": {
+        "page": "#050505",
+        "mesh_glows": ["rgba(216, 180, 226, 0.15)", "rgba(214, 232, 245, 0.15)", "rgba(255, 140, 105, 0.1)"],
+        "note": "Deep black page background. The 'magic' comes from large, highly blurred circles (filter: blur(100px)) using the pastel brand colors placed behind the glass cards."
+      },
+      "surface": {
+        "card": "rgba(15, 15, 15, 0.6)",
+        "card_secondary": "rgba(25, 25, 25, 0.4)",
+        "glass": "backdrop-filter: blur(24px); background: rgba(10, 10, 10, 0.7)",
+        "note": "Cards are dark and translucent (glassmorphism), allowing the background pastel glows to subtly shine through."
+      },
+      "accent": {
+        "primary": "#D8B4E2",
+        "secondary": "#D6E8F5",
+        "tertiary": "#FF8C69",
+        "quaternary": "#FFE4C4",
+        "gradient_primary": "linear-gradient(135deg, #D8B4E2 0%, #D6E8F5 100%)",
+        "gradient_warm": "linear-gradient(135deg, #FF8C69 0%, #FFE4C4 100%)",
+        "note": "Brand colors from the Auvvo guideline: Orchid Haze (Purple), Azure Mist (Blue), Coral Bloom (Coral), Soft Peach (Peach)."
+      },
+      "text": {
+        "primary": "#FFFFFF",
+        "secondary": "#A1A1AA",
+        "muted": "#52525B",
+        "on_accent": "#0A0A0A",
+        "gradient_text": "linear-gradient(to right, #FFFFFF, #A1A1AA)",
+        "note": "Pure white for primary data/headlines, neutral grays for body to reduce eye strain."
+      },
+      "semantic": {
+        "success": "#34D399",
+        "success_bg": "rgba(52, 211, 153, 0.1)",
+        "danger": "#F87171",
+        "danger_bg": "rgba(248, 113, 113, 0.1)",
+        "warning": "#FBBF24",
+        "warning_bg": "rgba(251, 191, 36, 0.1)",
+        "info": "#60A5FA",
+        "info_bg": "rgba(96, 165, 250, 0.1)"
+      },
+      "border": {
+        "default": "rgba(255, 255, 255, 0.08)",
+        "subtle": "rgba(255, 255, 255, 0.04)",
+        "glow": "1px solid rgba(216, 180, 226, 0.3)",
+        "note": "Borders are barely visible, acting as highlights on the edges of the glass panels."
+      }
+    },
+    "typography": {
+      "font_families": {
+        "display": "'Space Grotesk', sans-serif",
+        "body": "'Inter', sans-serif",
+        "mono": "'JetBrains Mono', monospace",
+        "note": "Space Grotesk substitutes 'Auvvo Sans' for a futuristic, geometric tech feel. Inter is perfectly legible for UI data."
+      },
+      "scale": {
+        "h1": {
+          "size": "3.5rem",
+          "weight": 700,
+          "line_height": "1.1",
+          "letter_spacing": "-0.03em"
+        },
+        "h2": {
+          "size": "2.25rem",
+          "weight": 600,
+          "line_height": "1.2",
+          "letter_spacing": "-0.02em"
+        },
+        "h3": {
+          "size": "1.25rem",
+          "weight": 500,
+          "line_height": "1.4"
+        },
+        "body": {
+          "size": "0.875rem",
+          "weight": 400,
+          "line_height": "1.6",
+          "color": "#A1A1AA"
+        },
+        "label": {
+          "size": "0.75rem",
+          "weight": 600,
+          "letter_spacing": "0.05em",
+          "text_transform": "uppercase",
+          "color": "#D8B4E2"
+        },
+        "code_snippet": {
+          "size": "0.8125rem",
+          "weight": 400,
+          "font_family": "JetBrains Mono",
+          "color": "#D6E8F5"
+        }
+      }
+    },
+    "spacing": {
+      "system": "4px base grid",
+      "page_padding": "32px horizontal on desktop, 16px on mobile",
+      "section_gap": "64px",
+      "card_padding": "24px",
+      "grid_gap": "20px",
+      "element_gap": "12px"
+    },
+    "shape": {
+      "border_radius": {
+        "card": "16px",
+        "card_inner": "12px",
+        "button": "8px",
+        "pill": "9999px",
+        "input": "8px",
+        "avatar": "50%"
+      }
+    },
+    "elevation": {
+      "glass_panel": "0 8px 32px rgba(0,0,0,0.4)",
+      "glow_hover": "0 0 20px rgba(216, 180, 226, 0.2)",
+      "inner_shadow": "inset 0 1px 0 rgba(255,255,255,0.1)",
+      "note": "Depth is created by inner top-borders (light catching the glass) and soft outer dark shadows."
+    },
+    "components": {
+      "sidebar": {
+        "background": "rgba(5,5,5,0.8)",
+        "border_right": "1px solid rgba(255,255,255,0.05)",
+        "logo_text": "Auvvo",
+        "logo_font": "Space Grotesk, 700, tracking-widest",
+        "nav_item": "color #A1A1AA, hover color #FFFFFF, hover background rgba(255,255,255,0.05)",
+        "active_item": "color #D8B4E2, left-border 2px solid #D8B4E2, background rgba(216,180,226,0.1)"
+      },
+      "card_glass": {
+        "base": "background rgba(15,15,15,0.6), backdrop-filter blur(24px), border 1px solid rgba(255,255,255,0.08), border-radius 16px",
+        "header": "padding 20px 24px, border-bottom 1px solid rgba(255,255,255,0.05)",
+        "body": "padding 24px"
+      },
+      "agent_card": {
+        "layout": "Flex column, top icon, title, status badge, action buttons",
+        "icon_wrapper": "background linear-gradient(135deg, rgba(216,180,226,0.2) 0%, rgba(214,232,245,0.2) 100%), border-radius 12px, padding 12px",
+        "hover": "transform translateY(-4px), border color #D8B4E2, box-shadow glow_hover"
+      },
+      "wizard_step_indicator": {
+        "layout": "Horizontal line with circles",
+        "active_circle": "background #D8B4E2, color #0A0A0A, box-shadow 0 0 12px rgba(216,180,226,0.5)",
+        "inactive_circle": "background transparent, border 1px solid rgba(255,255,255,0.2), color #52525B",
+        "line_active": "background #D8B4E2",
+        "line_inactive": "background rgba(255,255,255,0.1)"
+      },
+      "button": {
+        "primary": {
+          "background": "accent.gradient_primary",
+          "color": "#0A0A0A",
+          "border": "none",
+          "padding": "12px 24px",
+          "font_weight": 600,
+          "hover": "opacity 0.9, scale(1.02)"
+        },
+        "secondary": {
+          "background": "rgba(255,255,255,0.05)",
+          "color": "#FFFFFF",
+          "border": "1px solid rgba(255,255,255,0.1)",
+          "padding": "12px 24px",
+          "hover": "background rgba(255,255,255,0.1)"
+        },
+        "ghost": {
+          "color": "accent.primary",
+          "background": "transparent",
+          "hover": "background rgba(216,180,226,0.1)"
+        }
+      },
+      "input_field": {
+        "background": "rgba(0,0,0,0.5)",
+        "border": "1px solid rgba(255,255,255,0.1)",
+        "color": "#FFFFFF",
+        "padding": "12px 16px",
+        "placeholder": "#52525B",
+        "focus": "border #D8B4E2, box-shadow 0 0 0 2px rgba(216,180,226,0.2)",
+        "label": "font-size 0.875rem, color #A1A1AA, margin-bottom 8px"
+      },
+      "terminal_block": {
+        "description": "Used to show API keys or System Prompts",
+        "background": "#000000",
+        "border": "1px solid #1F1F1F",
+        "border_radius": "8px",
+        "font_family": "JetBrains Mono",
+        "color": "#34D399",
+        "padding": "16px"
+      }
+    },
+    "layout": {
+      "app_shell": "CSS Grid: 280px sidebar (fixed), 1fr main content area",
+      "max_width_content": "1000px in the main area to keep reading lines comfortable",
+      "wizard_layout": "Narrow centered column (max-width 600px) for step-by-step forms to maintain focus"
+    },
+    "motion": {
+      "transition_default": "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)",
+      "page_enter": "animation: fadeUp 0.6s ease-out forwards",
+      "mesh_breathe": "Background pastel meshes slowly pulse in scale and opacity (10s duration)"
+    },
+    "design_principles": [
+      "DARK & ETHEREAL: The UI is fundamentally dark mode, but it avoids looking 'hacker-ish' by using soft, highly blurred pastel color meshes in the background to create an ethereal, intelligent glow.",
+      "GLASS SURFACES: All cards and panels are translucent black with subtle white borders. They must let the background glows pass through them slightly.",
+      "NEON ACCENTS: Use the brand colors (Orchid Haze, Azure Mist) for active states, primary buttons, and glowing hover effects.",
+      "TECH TYPOGRAPHY: Use 'Space Grotesk' for all headings to give it an engineering/Nexus feel, while keeping 'Inter' for data readability.",
+      "WIZARD FOCUS: When creating an agent, hide the sidebar and center the form. The user should feel like they are interacting with a terminal/AI interface."
+    ]
+  }
+}
