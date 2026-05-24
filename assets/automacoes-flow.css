@@ -3,7 +3,8 @@
   display: grid;
   grid-template-columns: 260px 1fr 320px;
   gap: 0;
-  min-height: calc(100vh - 180px);
+  height: calc(100vh - 180px);
+  min-height: 520px;
   margin: 0 -8px 24px;
   border: 1px solid var(--border-subtle);
   border-radius: 14px;
@@ -106,22 +107,50 @@
 
 .flow-center {
   display: grid;
-  grid-template-rows: auto 1fr;
+  grid-template-areas:
+    "toolbar toolbar"
+    "routing routing"
+    "canvas playground";
+  grid-template-rows: auto auto minmax(400px, 1fr);
   grid-template-columns: 1fr auto;
   min-width: 0;
-  position: relative;
+  min-height: 0;
+  overflow: hidden;
 }
-.flow-toolbar { grid-column: 1 / -1; }
-.drawflow-wrap { grid-column: 1; min-height: 520px; }
+
+.flow-toolbar {
+  grid-area: toolbar;
+  grid-column: 1 / -1;
+}
+
+.flow-routing-bar {
+  grid-area: routing;
+  grid-column: 1 / -1;
+}
+
+.drawflow-wrap {
+  grid-area: canvas;
+  grid-column: 1;
+  min-height: 0;
+  height: 100%;
+  position: relative;
+  background:
+    radial-gradient(circle at 1px 1px, #d1d5db 1px, transparent 0);
+  background-size: 20px 20px;
+  background-color: #eef1f5;
+}
+
 .flow-playground {
   display: none;
+  grid-area: playground;
   grid-column: 2;
-  grid-row: 2;
+  grid-row: 3;
   width: 280px;
   border-left: 1px solid var(--border-subtle);
   padding: 12px;
   background: #fff;
   overflow-y: auto;
+  min-height: 0;
 }
 .flow-playground--open { display: block; }
 
@@ -174,36 +203,63 @@
   white-space: nowrap;
 }
 
-.drawflow-wrap {
-  flex: 1;
-  min-height: 520px;
-  position: relative;
-  background:
-    radial-gradient(circle at 1px 1px, #d1d5db 1px, transparent 0);
-  background-size: 20px 20px;
-  background-color: #eef1f5;
-}
-
 #drawflow {
   width: 100%;
   height: 100%;
-  min-height: 520px;
+  min-height: 400px;
 }
 
-.flow-palette {
+.flow-palette-wrap {
   position: absolute;
   left: 16px;
   bottom: 16px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  max-width: 420px;
   z-index: 10;
+  max-width: min(640px, calc(100% - 32px));
+}
+
+.flow-palette {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 6px;
   padding: 10px;
-  background: rgba(255,255,255,.95);
+  background: rgba(255,255,255,.97);
   border-radius: 12px;
   border: 1px solid var(--border-subtle);
   box-shadow: 0 4px 20px rgba(0,0,0,.08);
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.flow-palette-popover {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 8px);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-width: min(420px, calc(100vw - 48px));
+  padding: 10px;
+  background: #fff;
+  border-radius: 12px;
+  border: 1px solid var(--border-subtle);
+  box-shadow: 0 8px 28px rgba(15,23,42,.14);
+}
+
+.flow-palette-popover[hidden] {
+  display: none !important;
+}
+
+.flow-palette-popover::after {
+  content: '';
+  position: absolute;
+  left: 20px;
+  bottom: -6px;
+  width: 12px;
+  height: 12px;
+  background: #fff;
+  border-right: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--border-subtle);
+  transform: rotate(45deg);
 }
 
 .flow-palette-btn {
@@ -218,6 +274,8 @@
   font-weight: 600;
   cursor: pointer;
   color: var(--text-primary);
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .flow-palette-btn:hover {
@@ -247,9 +305,10 @@
 }
 
 .flow-props-body {
-  flex: 1;
+  flex: 0 1 auto;
   overflow-y: auto;
   padding: 16px;
+  max-height: 100%;
 }
 
 .flow-props-empty {
@@ -305,13 +364,15 @@
   background: transparent !important;
   border: none !important;
   width: auto !important;
-  min-width: 0 !important;
+  min-width: 240px !important;
   padding: 0 !important;
   box-shadow: none !important;
 }
 
 .fn-node {
   width: 240px;
+  min-width: 240px;
+  box-sizing: border-box;
   background: #fff;
   border-radius: 12px;
   border: 1px solid #e2e8f0;
@@ -322,10 +383,15 @@
 
 .fn-head {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 10px;
   padding: 12px 14px;
   border-bottom: 1px solid #f1f5f9;
+}
+
+.fn-head > div:last-child {
+  flex: 1;
+  min-width: 0;
 }
 
 .fn-icon {
@@ -349,6 +415,10 @@
 .fn-agent .fn-icon { background: #f0e7ff; color: #7c3aed; }
 .fn-agent { border-color: #ddd6fe; }
 .fn-agent .fn-title { color: #5b21b6; }
+.fn-think .fn-icon { background: #fef3c7; color: #b45309; }
+.fn-think { border-color: #fde68a; }
+.fn-think .fn-title { color: #92400e; }
+.flow-palette-btn--think { border-color: #fde68a; }
 
 .flow-palette-btn--agent {
   border-color: #c4b5fd;
@@ -361,14 +431,21 @@
   background: #f5f3ff;
 }
 
+.flow-palette-btn--more.active {
+  border-color: var(--accent-teal);
+  background: #f0fdfa;
+  color: #0f766e;
+}
+
 .flow-palette-btn--more {
   border-style: dashed;
   color: var(--text-muted);
+  flex-shrink: 0;
 }
 
+/* removido — extras agora ficam no popover */
 .flow-palette--extra {
-  bottom: 72px;
-  max-width: 280px;
+  display: none !important;
 }
 
 .page-tab-flow--legacy {
@@ -381,6 +458,14 @@
 .flow-sidebar-subbtns .btn { flex: 1; padding: 6px 8px; }
 
 .fn-wait-reply .fn-icon { background: #e0f2fe; color: #0369a1; }
+.fn-converse .fn-icon { background: #ede9fe; color: #6d28d9; }
+.fn-converse { border-color: #ddd6fe; }
+.fn-converse .fn-title { color: #5b21b6; }
+.flow-palette-btn--converse {
+  border-color: #ddd6fe;
+  background: linear-gradient(135deg, #faf5ff 0%, #f5f3ff 100%);
+}
+.flow-palette-btn--converse:hover { border-color: #a78bfa; }
 .fn-err {
   margin: 0 12px 8px;
   padding: 6px 8px;
@@ -431,6 +516,7 @@
   font-weight: 700;
   color: #0f172a;
   line-height: 1.2;
+  word-break: break-word;
 }
 
 .fn-sub {
@@ -655,7 +741,7 @@
   position: fixed;
   inset: 0;
   z-index: 500;
-  display: flex;
+  display: none;
   align-items: center;
   justify-content: center;
   padding: 24px;
@@ -664,8 +750,12 @@
   transition: opacity .2s;
 }
 .flow-modal.is-open {
+  display: flex;
   pointer-events: auto;
   opacity: 1;
+}
+.flow-modal[hidden] {
+  display: none !important;
 }
 .flow-modal-backdrop {
   position: absolute;
@@ -863,6 +953,7 @@
 /* Painel Propriedades — campos refinados */
 .flow-props-body {
   padding: 14px 16px 20px;
+  flex: 0 1 auto;
 }
 
 .props-field {
@@ -1046,6 +1137,16 @@
 }
 
 /* Pacotes completos */
+.flow-tpl-card--featured {
+  border-color: #059669;
+  box-shadow: 0 0 0 1px #05966922;
+}
+.flow-tpl-card--featured strong::after {
+  content: ' · recomendado';
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: #059669;
+}
 .flow-tpl-card--pack {
   min-height: 168px;
 }

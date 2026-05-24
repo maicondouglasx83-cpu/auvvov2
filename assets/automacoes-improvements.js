@@ -1,7 +1,27 @@
 /* Melhorias Automações — publicar, wizard, playground, erros nos nós */
 (function () {
   const API = window.API || 'backend/api.php';
-  const CSRF = document.getElementById('csrf-token')?.value || window.FLOW_BOOT?.csrf || '';
+
+  function getCsrf() {
+    return document.getElementById('csrf-token')?.value
+      || window.FLOW_BOOT?.csrf
+      || window.CSRF
+      || '';
+  }
+
+  function openFlowModal(modal) {
+    if (!modal) return;
+    modal.removeAttribute('hidden');
+    modal.classList.add('is-open');
+    modal.setAttribute('aria-hidden', 'false');
+  }
+
+  function closeFlowModal(modal) {
+    if (!modal) return;
+    modal.classList.remove('is-open');
+    modal.setAttribute('aria-hidden', 'true');
+    modal.hidden = true;
+  }
 
   let nodeErrorsMap = {};
   let simPausedRunId = 0;
@@ -35,22 +55,22 @@
     if (!modal || !body) return Promise.resolve(false);
     const items = checklist?.items || [];
     const ready = checklist?.ready;
-    body.innerHTML = items
-      .map((it) => {
-        const st = it.status || 'info';
-        const icon = st === 'ok' ? '✓' : st === 'fail' ? '✕' : st === 'warn' ? '!' : 'i';
-        return `<div class="pub-item pub-item--${esc(st)}">
+    body.innerHTML = items.length
+      ? items
+        .map((it) => {
+          const st = it.status || 'info';
+          const icon = st === 'ok' ? '✓' : st === 'fail' ? '✕' : st === 'warn' ? '!' : 'i';
+          return `<div class="pub-item pub-item--${esc(st)}">
           <span class="pub-icon">${icon}</span>
           <div><strong>${esc(it.label)}</strong>${it.detail ? `<p>${esc(it.detail)}</p>` : ''}</div>
         </div>`;
-      })
-      .join('');
-    modal.hidden = false;
-    modal.setAttribute('aria-hidden', 'false');
+        })
+        .join('')
+      : '<p class="text-muted">Nenhum item no checklist. Verifique se o fluxo está carregado.</p>';
+    openFlowModal(modal);
     return new Promise((resolve) => {
       const onClose = (ok) => {
-        modal.hidden = true;
-        modal.setAttribute('aria-hidden', 'true');
+        closeFlowModal(modal);
         document.getElementById('flow-publish-confirm')?.removeEventListener('click', onOk);
         document.getElementById('flow-publish-cancel')?.removeEventListener('click', onCancel);
         modal.querySelector('.flow-modal-backdrop')?.removeEventListener('click', onCancel);
@@ -68,7 +88,7 @@
 
   async function fetchChecklist() {
     const fd = new FormData();
-    fd.append('csrf_token', CSRF);
+    fd.append('csrf_token', getCsrf());
     fd.append('action', 'crm_flow_publish_checklist');
     if (typeof window.getCurrentFlowId === 'function') {
       const fid = window.getCurrentFlowId();
@@ -78,11 +98,27 @@
       const ex = window.getCurrentFlowExport();
       if (ex) fd.append('flow_data', JSON.stringify(ex));
     }
-    const d = await (await fetch(API, { method: 'POST', body: fd })).json();
-    return d.checklist || { ready: false, items: [] };
+    try {
+      const d = await (await fetch(API, { method: 'POST', body: fd })).json();
+      if (d.error) {
+        window.toast?.(d.message || 'Não foi possível validar o fluxo', 'error');
+        return {
+          ready: false,
+          items: [{ label: d.message || 'Erro ao validar', status: 'fail' }],
+        };
+      }
+      return d.checklist || { ready: false, items: [] };
+    } catch (e) {
+      window.toast?.('Falha de rede ao validar publicação', 'error');
+      return { ready: false, items: [{ label: 'Falha de rede', status: 'fail' }] };
+    }
   }
 
   window.publishCurrentFlow = async function () {
+    if (!window._flowEditor) {
+      window.toast?.('Editor ainda não carregou — aguarde um instante', 'error');
+      return false;
+    }
     if (typeof window.syncOpenPropsToEditor === 'function') window.syncOpenPropsToEditor();
     const checklist = await fetchChecklist();
     const go = await showPublishModal(checklist);
@@ -100,7 +136,7 @@
     const isActive = publishing ? 1 : 0;
     const exported = editor.export();
     const fd = new FormData();
-    fd.append('csrf_token', CSRF);
+    fd.append('csrf_token', getCsrf());
     fd.append('action', 'crm_save_flow');
     const curId = typeof window.getCurrentFlowId === 'function' ? window.getCurrentFlowId() : 0;
     if (curId) fd.append('id', curId);
@@ -151,7 +187,7 @@
       window.saveCurrentFlowDraft(false);
     });
     document.getElementById('btn-test-before-publish')?.addEventListener('click', () => {
-      if (typeof window.setAutomacoesMainTab === 'function') window.setAutomacoesMainTab('test');
+      if (typeof window.setAutomacoesTab === 'function') window.setAutomacoesTab('test');
     });
     document.getElementById('btn-flow-journey')?.addEventListener('click', () => {
       if (typeof window.addWhatsAppJourney === 'function') window.addWhatsAppJourney();
@@ -175,33 +211,29 @@
         return;
       }
       const modal = document.getElementById('flow-wizard-modal');
-      if (modal) {
-        modal.hidden = false;
-        modal.setAttribute('aria-hidden', 'false');
-      }
+      if (modal) openFlowModal(modal);
     } catch (e) {}
   }
 
   function bindWizard() {
     document.getElementById('wizard-use-template')?.addEventListener('click', () => {
       localStorage.setItem('auvvo_flow_wizard_done', '1');
-      document.getElementById('flow-wizard-modal').hidden = true;
+      closeFlowModal(document.getElementById('flow-wizard-modal'));
       document.getElementById('btn-new-flow')?.click();
     });
     document.getElementById('wizard-use-journey')?.addEventListener('click', () => {
       localStorage.setItem('auvvo_flow_wizard_done', '1');
-      document.getElementById('flow-wizard-modal').hidden = true;
+      closeFlowModal(document.getElementById('flow-wizard-modal'));
       window.addWhatsAppJourney?.();
     });
     document.getElementById('wizard-skip')?.addEventListener('click', () => {
       localStorage.setItem('auvvo_flow_wizard_done', '1');
-      document.getElementById('flow-wizard-modal').hidden = true;
+      closeFlowModal(document.getElementById('flow-wizard-modal'));
     });
   }
 
   window.highlightFlowNode = function (nodeId) {
-    if (typeof window.setAutomacoesMainTab === 'function') window.setAutomacoesMainTab('build');
-    if (typeof window.setAutomacoesPageTab === 'function') window.setAutomacoesPageTab('visual');
+    if (typeof window.setAutomacoesTab === 'function') window.setAutomacoesTab('visual');
     const el = document.querySelector('#node-' + nodeId);
     if (el) {
       el.classList.add('fn-node--highlight');
@@ -225,27 +257,51 @@
       const msg = document.getElementById('pg-message')?.value?.trim();
       if (!msg || typeof window.getCurrentFlowExport !== 'function') return;
       const pgChat = document.getElementById('pg-chat-messages');
+      if (pgChat.querySelector('.sim-chat-empty')) pgChat.innerHTML = '';
       pgChat.innerHTML += `<div class="sim-msg sim-msg--user">${esc(msg)}</div>`;
       document.getElementById('pg-message').value = '';
+
+      const exp = window.getCurrentFlowExport();
+      const tr = typeof window.extractFlowTriggerFromExport === 'function'
+        ? window.extractFlowTriggerFromExport(exp)
+        : { trigger_type: 'whatsapp_first', trigger_value: '*' };
+
       const fd = new FormData();
-      fd.append('csrf_token', CSRF);
+      fd.append('csrf_token', getCsrf());
       fd.append('action', 'crm_simulate_flow');
-      fd.append('flow_data', JSON.stringify(window.getCurrentFlowExport()));
-      fd.append('trigger_type', 'whatsapp_first');
-      fd.append('trigger_value', '*');
+      fd.append('flow_data', JSON.stringify(exp));
+      fd.append('trigger_type', tr.trigger_type || 'whatsapp_first');
+      fd.append('trigger_value', tr.trigger_value || '*');
       fd.append('message_body', msg);
       fd.append('name', 'Teste');
       fd.append('phone', '11999998888');
+      const boot = window.FLOW_BOOT || {};
+      const conn = (boot.whatsappConnections && boot.whatsappConnections[0]) ? boot.whatsappConnections[0].id : 0;
+      if (conn > 0) fd.append('connection_id', String(conn));
       if (document.getElementById('pg-use-llm')?.checked) fd.append('use_llm', '1');
       try {
         const d = await (await fetch(API, { method: 'POST', body: fd })).json();
-        (d.steps || []).slice(-3).forEach((s) => {
-          if (s.detail) pgChat.innerHTML += `<div class="sim-msg sim-msg--bot"><small>${esc(s.node_label || '')}</small><div>${esc(String(s.detail).slice(0, 180))}</div></div>`;
+        if (!d.matched && d.steps?.length) {
+          pgChat.innerHTML += `<div class="sim-msg sim-msg--system">Gatilho não bateu — ajuste o nó Início ou use a aba Testar.</div>`;
+        }
+        (d.steps || []).forEach((s) => {
+          let text = s.detail || '';
+          if (s.node_class === 'flow_message') text = text.replace(/^WhatsApp \(simulado\): /, '');
+          if (s.node_class === 'flow_agent' || s.node_class === 'flow_think') {
+            const nl = text.indexOf('\n');
+            if (nl >= 0) text = text.slice(nl + 1);
+          }
+          if (text) {
+            const ai = s.node_class === 'flow_agent' || s.node_class === 'flow_think';
+            pgChat.innerHTML += `<div class="sim-msg ${ai ? 'sim-msg--ai' : 'sim-msg--bot'}"><small>${esc(s.node_label || '')}</small><div>${esc(String(text).slice(0, 400))}</div></div>`;
+          }
         });
         pgChat.scrollTop = pgChat.scrollHeight;
-      } catch (e) {}
+      } catch (e) {
+        pgChat.innerHTML += `<div class="sim-msg sim-msg--system">Erro no teste rápido</div>`;
+      }
     });
-  };
+  }
 
   document.addEventListener('DOMContentLoaded', () => {
     if (window._flowEditor) bindToolbar();

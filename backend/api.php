@@ -480,7 +480,7 @@ switch ($action) {
                      ON DUPLICATE KEY UPDATE ia_paused_until=NULL, manual_owner_user_id=NULL"
                 )->execute([$agent_id, $contact_jid]);
             }
-        } catch (PDOException $e) {}
+        } catch (PDOException $e) { error_log('[Auvvo] api ia_resume: ' . $e->getMessage()); }
 
         json_out(['error'=>false,'paused'=>$paused,'minutes'=>$minutes]);
     }
@@ -560,7 +560,7 @@ switch ($action) {
                 $pdo->prepare("DELETE FROM manual_message_dedup WHERE created_at < DATE_SUB(NOW(), INTERVAL 7 DAY)")->execute();
                 $pdo->prepare("DELETE FROM manual_send_throttle WHERE created_at < DATE_SUB(NOW(), INTERVAL 2 DAY)")->execute();
             }
-        } catch (PDOException $e) {}
+        } catch (PDOException $e) { error_log('[Auvvo] api manual cleanup: ' . $e->getMessage()); }
 
         json_out(['error'=>false,'sent'=>true,'raw'=>$res,'duplicate'=>false]);
     }
@@ -595,7 +595,7 @@ switch ($action) {
                 $until = $row['ia_paused_until'];
                 $paused = strtotime($until) > time();
             }
-        } catch (PDOException $e) {}
+        } catch (PDOException $e) { error_log('[Auvvo] api pause status: ' . $e->getMessage()); }
 
         json_out(['error'=>false,'paused'=>$paused,'ia_paused_until'=>$until]);
     }

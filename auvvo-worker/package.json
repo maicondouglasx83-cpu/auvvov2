@@ -8,7 +8,10 @@
     "dev": "node --watch src/index.js",
     "status": "node scripts/queue-status.mjs",
     "ping-php": "node scripts/ping-php.mjs",
-    "ping-internal": "node scripts/ping-internal.mjs"
+    "ping-internal": "node scripts/ping-internal.mjs",
+    "clean-dev": "node scripts/clean-dev.mjs",
+    "requeue-failed": "node scripts/requeue-failed.mjs",
+    "diag-hmac": "node scripts/diag-hmac.mjs"
   },
   "dependencies": {
     "dotenv": "^16.4.5",

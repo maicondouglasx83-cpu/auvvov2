@@ -5,7 +5,7 @@
 declare(strict_types=1);
 
 /** Incrementar ao adicionar migração que altera schema em produção. */
-const AUVVO_SCHEMA_VERSION = 44;
+const AUVVO_SCHEMA_VERSION = 46;
 
 function auvvo_run_migrations(PDO $pdo): void
 {
@@ -53,6 +53,9 @@ function auvvo_run_migrations(PDO $pdo): void
     auvvo_migration_connection_id_columns($pdo);
     auvvo_migration_automation_runs($pdo);
     auvvo_migration_automation_wait_states($pdo);
+    auvvo_migration_login_attempts($pdo);
+    auvvo_migration_password_resets($pdo);
+    auvvo_migration_foreign_keys($pdo);
 
     auvvo_migrations_mark_schema_current($pdo);
 }
@@ -1027,4 +1030,20 @@ function auvvo_migration_connection_id_columns_repair(PDO $pdo): void
     } catch (PDOException $e) {
         error_log('[Auvvo] migration campaigns connection backfill: ' . $e->getMessage());
     }
+}
+
+/** Rate limiting de login por IP real — v46. */
+function auvvo_migration_login_attempts(PDO $pdo): void {
+    try { $pdo->exec("CREATE TABLE IF NOT EXISTS login_attempts (ip VARCHAR(45) NOT NULL PRIMARY KEY, attempts INT UNSIGNED NOT NULL DEFAULT 1, first_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, INDEX idx_la_first (first_at)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"); } catch (PDOException $e) { error_log("[Auvvo] migration login_attempts: " . $e->getMessage()); }
+}
+
+/** Tokens de recuperacao de senha — v46. */
+function auvvo_migration_password_resets(PDO $pdo): void {
+    try { $pdo->exec("CREATE TABLE IF NOT EXISTS password_resets (id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY, user_id INT UNSIGNED NOT NULL, token VARCHAR(64) NOT NULL, expires_at DATETIME NOT NULL, used TINYINT(1) NOT NULL DEFAULT 0, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, INDEX idx_pr_token (token), INDEX idx_pr_user (user_id), INDEX idx_pr_expires (expires_at)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"); } catch (PDOException $e) { error_log("[Auvvo] migration password_resets: " . $e->getMessage()); }
+}
+
+/** Foreign keys — v46. */
+function auvvo_migration_foreign_keys(PDO $pdo): void {
+    $fks = [["agents","user_id","users","id","CASCADE"],["contacts","user_id","users","id","CASCADE"],["whatsapp_connections","user_id","users","id","CASCADE"],["crm_pipelines","user_id","users","id","CASCADE"],["campaigns","user_id","users","id","CASCADE"]];
+    foreach ($fks as [$t,$c,$rt,$rc,$od]) { $n="fk_{$t}_{$c}"; try { $pdo->exec("ALTER TABLE `$t` ADD CONSTRAINT `$n` FOREIGN KEY (`$c`) REFERENCES `$rt`(`$rc`) ON DELETE $od"); } catch (PDOException $e) { if (!(isset($e->errorInfo[1]) && (int)$e->errorInfo[1]===1005)) error_log("[Auvvo] FK $n: ".$e->getMessage()); } }
 }

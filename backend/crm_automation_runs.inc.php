@@ -271,6 +271,7 @@ function auvvo_automation_simulate_flow(
     require_once __DIR__ . '/crm_flow_engine.inc.php';
     require_once __DIR__ . '/crm_automation_motor.inc.php';
     require_once __DIR__ . '/crm_flow_wait_reply.inc.php';
+    require_once __DIR__ . '/crm_flow_converse.inc.php';
 
     auvvo_run_migrations($pdo);
 
@@ -285,6 +286,44 @@ function auvvo_automation_simulate_flow(
                 ['error' => (bool) ($resume['error'] ?? false)],
                 $resume
             );
+        }
+
+        $metaUseLlm = $useLlm;
+        try {
+            $stMeta = $pdo->prepare('SELECT meta_json FROM crm_automation_runs WHERE id = ? AND user_id = ? LIMIT 1');
+            $stMeta->execute([$continueRunId, $userId]);
+            $metaRow = json_decode((string) ($stMeta->fetchColumn() ?: '{}'), true);
+            if (is_array($metaRow) && !empty($metaRow['simulate_use_llm'])) {
+                $metaUseLlm = true;
+            }
+        } catch (PDOException $e) {
+        }
+
+        $ctx = [
+            'simulate_use_llm' => $metaUseLlm,
+            'automation_run' => ['id' => $continueRunId, 'simulate' => true, 'step_order' => 0],
+        ];
+        $converse = auvvo_flow_converse_simulate_continue($pdo, $userId, $continueRunId, $messageBody, $contact, $ctx);
+        if (!empty($converse['handled'])) {
+            $status = !empty($converse['ended']) ? 'done' : 'paused';
+            if (!empty($converse['ended'])) {
+                auvvo_automation_run_finish($pdo, $continueRunId, 'done');
+            }
+            $steps = auvvo_automation_run_fetch_steps($pdo, $continueRunId);
+
+            return [
+                'error' => false,
+                'handled' => true,
+                'run_id' => $continueRunId,
+                'status' => $status,
+                'waiting_reply' => $status === 'paused',
+                'steps' => $steps,
+                'contact' => [
+                    'name' => $contact['name'] ?? '',
+                    'stage' => $contact['stage'] ?? '',
+                    'tags' => $contact['tags'] ?? [],
+                ],
+            ];
         }
 
         return ['error' => true, 'message' => 'Execução não está aguardando resposta'];
@@ -352,43 +391,56 @@ function auvvo_automation_simulate_flow(
 
     $matched = false;
     $finalStatus = 'skipped';
+    $matchedPair = [$triggerType, $triggerValue];
 
-    foreach ($nodes as $nodeId => $node) {
-        if ((string) ($node['class'] ?? '') !== 'flow_trigger') {
-            continue;
-        }
-        $data = is_array($node['data'] ?? null) ? $node['data'] : [];
-        if (!auvvo_flow_trigger_matches($data, $triggerType, $triggerValue)) {
-            continue;
-        }
-        $matched = true;
-        try {
-            $r = auvvo_flow_walk(
-                $pdo,
-                $userId,
-                $flowId,
-                $nodes,
-                (string) $nodeId,
-                $contact,
-                $triggerType,
-                $triggerValue,
-                $context,
-                0
-            );
-            $finalStatus = $r === 'paused' ? 'paused' : 'done';
-        } catch (Throwable $e) {
-            auvvo_automation_run_finish($pdo, $runId, 'failed', $e->getMessage());
-            $steps = auvvo_automation_run_fetch_steps($pdo, $runId);
+    $triggerCandidates = auvvo_flow_simulate_trigger_candidates(
+        $triggerType,
+        $triggerValue,
+        $connectionId,
+        $nodes,
+        $userId,
+        $pdo
+    );
 
-            return [
-                'error' => true,
-                'message' => $e->getMessage(),
-                'run_id' => $runId,
-                'status' => 'failed',
-                'steps' => $steps,
-            ];
+    foreach ($triggerCandidates as [$tryType, $tryValue]) {
+        foreach ($nodes as $nodeId => $node) {
+            if (auvvo_flow_node_type($node) !== 'flow_trigger') {
+                continue;
+            }
+            $data = is_array($node['data'] ?? null) ? $node['data'] : [];
+            if (!auvvo_flow_trigger_matches($data, $tryType, $tryValue, $pdo, $userId)) {
+                continue;
+            }
+            $matched = true;
+            $matchedPair = [$tryType, $tryValue];
+            try {
+                $r = auvvo_flow_walk(
+                    $pdo,
+                    $userId,
+                    $flowId,
+                    $nodes,
+                    (string) $nodeId,
+                    $contact,
+                    $tryType,
+                    $tryValue,
+                    $context,
+                    0
+                );
+                $finalStatus = $r === 'paused' ? 'paused' : 'done';
+            } catch (Throwable $e) {
+                auvvo_automation_run_finish($pdo, $runId, 'failed', $e->getMessage());
+                $steps = auvvo_automation_run_fetch_steps($pdo, $runId);
+
+                return [
+                    'error' => true,
+                    'message' => $e->getMessage(),
+                    'run_id' => $runId,
+                    'status' => 'failed',
+                    'steps' => $steps,
+                ];
+            }
+            break 2;
         }
-        break;
     }
 
     if (!$matched) {
@@ -400,6 +452,7 @@ function auvvo_automation_simulate_flow(
             'Gatilho',
             'skip',
             'Nenhum nó Início corresponde a ' . $triggerType . ' / ' . $triggerValue
+            . ' — confira o tipo de gatilho do fluxo ou use «Usar editor» com o canvas correto'
         );
         $finalStatus = 'skipped';
     }
@@ -428,6 +481,7 @@ function auvvo_automation_simulate_flow(
         'run_id' => $runId,
         'status' => $finalStatus,
         'matched' => $matched,
+        'matched_trigger' => $matched ? ['type' => $matchedPair[0], 'value' => $matchedPair[1]] : null,
         'waiting_reply' => $finalStatus === 'paused',
         'steps' => $steps,
         'contact' => [

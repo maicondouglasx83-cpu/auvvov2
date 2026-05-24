@@ -8,6 +8,7 @@ require_once __DIR__ . '/crm_automation_dedupe.inc.php';
 require_once __DIR__ . '/crm_automation_runs.inc.php';
 require_once __DIR__ . '/crm_flow_agent.inc.php';
 require_once __DIR__ . '/crm_flow_wait_reply.inc.php';
+require_once __DIR__ . '/crm_flow_converse.inc.php';
 
 /**
  * @return array<string, array>
@@ -29,7 +30,19 @@ function auvvo_flow_parse_nodes(?string $flowDataJson): array
     return $home;
 }
 
-function auvvo_flow_trigger_matches(array $nodeData, string $triggerType, string $triggerValue): bool
+/** Tipo lógico do nó (Drawflow guarda em class e/ou name). */
+function auvvo_flow_node_type(array $node): string
+{
+    $class = trim((string) ($node['class'] ?? ''));
+    if ($class !== '' && str_starts_with($class, 'flow_')) {
+        return $class;
+    }
+    $name = trim((string) ($node['name'] ?? ''));
+
+    return $name !== '' ? $name : $class;
+}
+
+function auvvo_flow_trigger_matches(array $nodeData, string $triggerType, string $triggerValue, ?PDO $pdo = null, int $userId = 0): bool
 {
     $nt = trim((string) ($nodeData['trigger_type'] ?? ''));
     if ($nt === '' || $nt !== $triggerType) {
@@ -39,14 +52,97 @@ function auvvo_flow_trigger_matches(array $nodeData, string $triggerType, string
     if ($nv === '' || $nv === '*') {
         return true;
     }
-    if ($nv === $triggerValue) {
+    $tv = trim($triggerValue);
+    if ($tv === '' || $tv === '*') {
         return true;
     }
-    if (in_array($nt, ['whatsapp_first', 'whatsapp_message'], true) && ctype_digit($nv) && ctype_digit($triggerValue)) {
-        return (int) $nv === (int) $triggerValue;
+    if ($nv === $tv) {
+        return true;
+    }
+    if (in_array($nt, ['whatsapp_first', 'whatsapp_message'], true) && ctype_digit($nv) && ctype_digit($tv)) {
+        if ((int) $nv === (int) $tv) {
+            return true;
+        }
+        if ($pdo && $userId > 0) {
+            require_once __DIR__ . '/whatsapp_connections.inc.php';
+            $connForNodeAgent = auvvo_whatsapp_connection_id_for_agent($pdo, $userId, (int) $nv);
+            if ($connForNodeAgent > 0 && $connForNodeAgent === (int) $tv) {
+                return true;
+            }
+            $connForEventAgent = auvvo_whatsapp_connection_id_for_agent($pdo, $userId, (int) $tv);
+            if ($connForEventAgent > 0 && $connForEventAgent === (int) $nv) {
+                return true;
+            }
+            if (auvvo_whatsapp_connection_get($pdo, $userId, (int) $nv) && (int) $nv === (int) $tv) {
+                return true;
+            }
+        }
     }
 
     return false;
+}
+
+/**
+ * Candidatos de gatilho para simulação (alinha com webhook: conexão, agente, *).
+ *
+ * @param array<string, array> $nodes
+ * @return list<array{0:string,1:string}>
+ */
+function auvvo_flow_simulate_trigger_candidates(
+    string $triggerType,
+    string $triggerValue,
+    int $connectionId,
+    array $nodes,
+    int $userId,
+    PDO $pdo
+): array {
+    $seen = [];
+    $add = static function (string $type, string $value) use (&$seen, &$out): void {
+        $value = trim($value);
+        if ($value === '') {
+            $value = '*';
+        }
+        $key = $type . "\0" . $value;
+        if (isset($seen[$key])) {
+            return;
+        }
+        $seen[$key] = true;
+        $out[] = [$type, $value];
+    };
+
+    $out = [];
+    $add($triggerType, $triggerValue);
+
+    if (in_array($triggerType, ['whatsapp_first', 'whatsapp_message'], true)) {
+        if ($connectionId > 0) {
+            $add($triggerType, (string) $connectionId);
+        }
+        $add($triggerType, '*');
+        foreach ($nodes as $node) {
+            if (auvvo_flow_node_type($node) !== 'flow_trigger') {
+                continue;
+            }
+            $data = is_array($node['data'] ?? null) ? $node['data'] : [];
+            if ((string) ($data['trigger_type'] ?? '') !== $triggerType) {
+                continue;
+            }
+            $nv = trim((string) ($data['trigger_value'] ?? '*'));
+            if ($nv !== '') {
+                $add($triggerType, $nv);
+                if ($pdo && $userId > 0 && ctype_digit($nv)) {
+                    require_once __DIR__ . '/whatsapp_connections.inc.php';
+                    $cid = auvvo_whatsapp_connection_id_for_agent($pdo, $userId, (int) $nv);
+                    if ($cid > 0) {
+                        $add($triggerType, (string) $cid);
+                    }
+                }
+            }
+        }
+    } elseif ($triggerType === 'tag_added' && $triggerValue === '') {
+        $add($triggerType, 'teste');
+    }
+
+    return $out;
 }
 
 /**
@@ -100,13 +196,13 @@ function auvvo_flow_walk(
     }
 
     $node = $nodes[$startNodeId];
-    $class = (string) ($node['class'] ?? '');
+    $nodeType = auvvo_flow_node_type($node);
     $data = is_array($node['data'] ?? null) ? $node['data'] : [];
     $nodeLabel = auvvo_automation_node_label($node);
 
-    switch ($class) {
+    switch ($nodeType) {
         case 'flow_trigger':
-            auvvo_automation_run_log_step($pdo, $context, $startNodeId, $class, $nodeLabel, 'ok', 'Gatilho: ' . ($data['trigger_type'] ?? ''));
+            auvvo_automation_run_log_step($pdo, $context, $startNodeId, $nodeType, $nodeLabel, 'ok', 'Gatilho: ' . ($data['trigger_type'] ?? ''));
             $next = auvvo_flow_next_node_ids($node, 'output_1');
             return auvvo_flow_walk_many($pdo, $userId, $flowId, $nodes, $next, $contact, $triggerType, $triggerValue, $context, $depth + 1);
 
@@ -117,7 +213,7 @@ function auvvo_flow_walk(
                 $pdo,
                 $context,
                 $startNodeId,
-                $class,
+                $nodeType,
                 $nodeLabel,
                 $ok ? 'ok' : 'branch_no',
                 $ok ? 'Condição passou' : 'Condição não passou',
@@ -133,7 +229,7 @@ function auvvo_flow_walk(
                 $pdo,
                 $context,
                 $startNodeId,
-                $class,
+                $nodeType,
                 $nodeLabel,
                 'ok',
                 $outKey === 'output_1' ? 'Ramificação A' : 'Ramificação B',
@@ -146,7 +242,7 @@ function auvvo_flow_walk(
             $mins = max(1, (int) ($data['delay_minutes'] ?? 5));
             $next = auvvo_flow_next_node_ids($node, 'output_1');
             if ($next === []) {
-                auvvo_automation_run_log_step($pdo, $context, $startNodeId, $class, $nodeLabel, 'ok', "Espera {$mins} min (fim do fluxo)");
+                auvvo_automation_run_log_step($pdo, $context, $startNodeId, $nodeType, $nodeLabel, 'ok', "Espera {$mins} min (fim do fluxo)");
                 return 'ok';
             }
             if (auvvo_automation_is_simulate($context)) {
@@ -154,7 +250,7 @@ function auvvo_flow_walk(
                     $pdo,
                     $context,
                     $startNodeId,
-                    $class,
+                    $nodeType,
                     $nodeLabel,
                     'simulated',
                     "Espera {$mins} min (simulado — pulado)"
@@ -176,18 +272,69 @@ function auvvo_flow_walk(
             return 'paused';
 
         case 'flow_message':
+            $agentId = auvvo_crm_resolve_agent_id((int) ($data['agent_id'] ?? 0), $contact, $context);
+            $connectionId = auvvo_crm_resolve_whatsapp_connection_id(
+                $pdo,
+                $userId,
+                (int) ($data['connection_id'] ?? 0),
+                $agentId,
+                $context,
+                $contact
+            );
             $cfg = [
-                'connection_id' => (int) ($data['connection_id'] ?? $context['whatsapp_connection_id'] ?? 0),
-                'agent_id'      => auvvo_crm_resolve_agent_id((int) ($data['agent_id'] ?? 0), $contact, $context),
+                'connection_id' => $connectionId,
+                'agent_id'      => $agentId,
                 'message'       => (string) ($data['message'] ?? ''),
                 '_node_id'      => $startNodeId,
                 '_node_label'   => $nodeLabel,
+                '_node_class'   => 'flow_message',
             ];
-            if ($cfg['message'] !== '') {
+            if ($cfg['message'] === '') {
+                auvvo_automation_run_log_step($pdo, $context, $startNodeId, 'flow_message', $nodeLabel, 'error', 'Texto da mensagem vazio');
+            } elseif (auvvo_automation_is_simulate($context)) {
                 auvvo_crm_execute_action($pdo, $userId, 'send_whatsapp', $cfg, $contact, $triggerType, $triggerValue, $context);
-                if (!auvvo_automation_is_simulate($context) && auvvo_automation_run_ctx($context)) {
-                    auvvo_automation_run_log_step($pdo, $context, $startNodeId, 'flow_message', $nodeLabel, 'ok', 'Mensagem enviada');
+            } else {
+                $send = auvvo_crm_send_whatsapp($pdo, $userId, $cfg, $contact, $context);
+                $st = $send['ok'] ? 'ok' : 'error';
+                $detail = $send['ok']
+                    ? ('WhatsApp: ' . mb_substr($send['sent'], 0, 500))
+                    : ($send['error'] ?: 'Falha ao enviar');
+                auvvo_automation_run_log_step($pdo, $context, $startNodeId, 'flow_message', $nodeLabel, $st, $detail);
+                if (!$send['ok']) {
+                    auvvo_flow_bump_stats($pdo, $flowId, 'stats_error');
                 }
+            }
+            $next = auvvo_flow_next_node_ids($node, 'output_1');
+            return auvvo_flow_walk_many($pdo, $userId, $flowId, $nodes, $next, $contact, $triggerType, $triggerValue, $context, $depth + 1);
+
+        case 'flow_think':
+            $result = auvvo_flow_run_think_node($pdo, $userId, $data, $contact, $context, $startNodeId, $nodeLabel);
+            $st = ($result['ok'] ?? false) ? (auvvo_automation_is_simulate($context) ? 'simulated' : 'ok') : 'error';
+            $detail = (string) ($result['detail'] ?? '');
+            if (!empty($result['response'])) {
+                $detail .= ($detail !== '' ? "\n" : '') . (string) $result['response'];
+            }
+            auvvo_automation_run_log_step($pdo, $context, $startNodeId, 'flow_think', $nodeLabel, $st, $detail);
+            if (!($result['ok'] ?? false) && !auvvo_automation_is_simulate($context)) {
+                auvvo_flow_bump_stats($pdo, $flowId, 'stats_error');
+            }
+            $next = auvvo_flow_next_node_ids($node, 'output_1');
+            return auvvo_flow_walk_many($pdo, $userId, $flowId, $nodes, $next, $contact, $triggerType, $triggerValue, $context, $depth + 1);
+
+        case 'flow_converse':
+            $context['flow_id'] = $flowId;
+            $result = auvvo_flow_run_converse_node($pdo, $userId, $data, $contact, $context, $startNodeId, $nodeLabel);
+            $st = ($result['ok'] ?? false) ? (auvvo_automation_is_simulate($context) ? 'simulated' : 'ok') : 'error';
+            $detail = (string) ($result['detail'] ?? '');
+            if (!empty($result['response'])) {
+                $detail .= ($detail !== '' ? "\n" : '') . (string) $result['response'];
+            }
+            auvvo_automation_run_log_step($pdo, $context, $startNodeId, 'flow_converse', $nodeLabel, $st, $detail);
+            if (!($result['ok'] ?? false) && !auvvo_automation_is_simulate($context)) {
+                auvvo_flow_bump_stats($pdo, $flowId, 'stats_error');
+            }
+            if (($result['ok'] ?? false) && auvvo_automation_is_simulate($context)) {
+                return 'paused';
             }
             $next = auvvo_flow_next_node_ids($node, 'output_1');
             return auvvo_flow_walk_many($pdo, $userId, $flowId, $nodes, $next, $contact, $triggerType, $triggerValue, $context, $depth + 1);
@@ -201,13 +348,26 @@ function auvvo_flow_walk(
                         $pdo,
                         $userId,
                         'set_memory',
-                        ['key' => $memKey, 'value' => $val],
+                        ['key' => $memKey, 'value' => $val, '_node_id' => $startNodeId, '_node_label' => $nodeLabel],
                         $contact,
                         $triggerType,
                         $triggerValue,
                         $context
                     );
                     $contact = auvvo_crm_hydrate_contact($pdo, $userId, $contact);
+                    if (!auvvo_automation_is_simulate($context) && auvvo_automation_run_ctx($context)) {
+                        auvvo_automation_run_log_step(
+                            $pdo,
+                            $context,
+                            $startNodeId,
+                            'flow_memory',
+                            $nodeLabel,
+                            'ok',
+                            'Memória «' . $memKey . '» = ' . mb_substr($val, 0, 200)
+                        );
+                    }
+                } elseif (auvvo_automation_run_ctx($context)) {
+                    auvvo_automation_run_log_step($pdo, $context, $startNodeId, 'flow_memory', $nodeLabel, 'branch_no', 'Nenhum valor para gravar');
                 }
             }
             $next = auvvo_flow_next_node_ids($node, 'output_1');
@@ -249,11 +409,42 @@ function auvvo_flow_walk(
                 if (in_array($actionType, ['send_whatsapp', 'invoke_agent', 'assign_agent', 'pause_ai', 'resume_ai'], true)) {
                     $exec['agent_id'] = auvvo_crm_resolve_agent_id((int) ($exec['agent_id'] ?? 0), $contact, $context);
                 }
+                if ($actionType === 'send_whatsapp') {
+                    $exec['connection_id'] = auvvo_crm_resolve_whatsapp_connection_id(
+                        $pdo,
+                        $userId,
+                        (int) ($exec['connection_id'] ?? 0),
+                        (int) ($exec['agent_id'] ?? 0),
+                        $context,
+                        $contact
+                    );
+                    $exec['_node_class'] = 'flow_message';
+                }
                 $exec['_node_id'] = $startNodeId;
                 $exec['_node_label'] = $nodeLabel;
-                auvvo_crm_execute_action($pdo, $userId, $actionType, $exec, $contact, $triggerType, $triggerValue, $context);
-                if (!auvvo_automation_is_simulate($context) && auvvo_automation_run_ctx($context)) {
-                    auvvo_automation_run_log_step($pdo, $context, $startNodeId, 'flow_action', $nodeLabel, 'ok', $actionType . ' executado');
+                if (auvvo_automation_is_simulate($context)) {
+                    auvvo_crm_execute_action($pdo, $userId, $actionType, $exec, $contact, $triggerType, $triggerValue, $context);
+                } elseif ($actionType === 'send_whatsapp') {
+                    $send = auvvo_crm_send_whatsapp($pdo, $userId, $exec, $contact, $context);
+                    if (auvvo_automation_run_ctx($context)) {
+                        auvvo_automation_run_log_step(
+                            $pdo,
+                            $context,
+                            $startNodeId,
+                            'flow_message',
+                            $nodeLabel,
+                            $send['ok'] ? 'ok' : 'error',
+                            $send['ok'] ? ('WhatsApp: ' . mb_substr($send['sent'], 0, 500)) : ($send['error'] ?: 'Falha ao enviar')
+                        );
+                    }
+                    if (!$send['ok']) {
+                        auvvo_flow_bump_stats($pdo, $flowId, 'stats_error');
+                    }
+                } else {
+                    auvvo_crm_execute_action($pdo, $userId, $actionType, $exec, $contact, $triggerType, $triggerValue, $context);
+                    if (auvvo_automation_run_ctx($context)) {
+                        auvvo_automation_run_log_step($pdo, $context, $startNodeId, 'flow_action', $nodeLabel, 'ok', $actionType . ' executado');
+                    }
                 }
                 if (in_array($actionType, ['assign_agent', 'invoke_agent', 'set_memory', 'brain_mission', 'clear_brain_mission'], true)) {
                     $contact = auvvo_crm_hydrate_contact($pdo, $userId, $contact);
@@ -390,7 +581,7 @@ function auvvo_crm_run_ltv_visual_flows(PDO $pdo, int $userId, array $contact): 
         }
 
         foreach ($nodes as $nodeId => $node) {
-            if ((string) ($node['class'] ?? '') !== 'flow_trigger') {
+            if (auvvo_flow_node_type($node) !== 'flow_trigger') {
                 continue;
             }
             $data = is_array($node['data'] ?? null) ? $node['data'] : [];
@@ -461,7 +652,7 @@ function auvvo_crm_run_visual_flows(
         }
 
         foreach ($nodes as $nodeId => $node) {
-            if ((string) ($node['class'] ?? '') !== 'flow_trigger') {
+            if (auvvo_flow_node_type($node) !== 'flow_trigger') {
                 continue;
             }
             $data = is_array($node['data'] ?? null) ? $node['data'] : [];

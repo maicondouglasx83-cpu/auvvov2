@@ -208,7 +208,7 @@ function auvvo_webhook_run_ai_pipeline(
         $fallback = 'Entendi! Só um instante que vou acionar um especialista para te ajudar. 🙏';
         $sent     = false;
         $throttleDuplicate = false;
-        $bucket   = '10m_' . date('Ymd_Hi', floor(time() / 600) * 600);
+        $bucket   = '10m_' . date('Ymd_Hi', auvvo_unix_ts(floor(time() / 600) * 600));
         try {
             $st = $pdo->prepare(
                 'INSERT INTO webhook_fallback_throttle (agent_id, contact_jid, bucket) VALUES (?, ?, ?)'

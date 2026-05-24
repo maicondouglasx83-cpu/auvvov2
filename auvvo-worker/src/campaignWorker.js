@@ -1,10 +1,11 @@
 import { getPool } from './db.js';
 import { config } from './config.js';
+import { fetchWithTimeout } from './httpClient.js';
 
 let sentThisMinute = 0;
 let minuteWindow = Math.floor(Date.now() / 60000);
 
-function rateOk() {
+function tryClaimRateSlot() {
   const w = Math.floor(Date.now() / 60000);
   if (w !== minuteWindow) {
     minuteWindow = w;
@@ -48,14 +49,14 @@ async function sendWhatsApp(conn, item) {
     'SELECT evolution_url, evolution_key FROM settings WHERE user_id = ? LIMIT 1',
     [cred.user_id]
   );
-  let baseUrl = process.env.EVOLUTION_API_URL || 'http://localhost:8080';
-  let apiKey = process.env.EVOLUTION_API_KEY || '';
+  let baseUrl = config.evolution.apiUrl;
+  let apiKey = config.evolution.apiKey;
   if (settings[0]?.evolution_url) baseUrl = settings[0].evolution_url;
   if (settings[0]?.evolution_key) apiKey = settings[0].evolution_key;
 
   const phone = String(item.phone).replace(/\D/g, '');
   const url = `${baseUrl.replace(/\/$/, '')}/send/text`;
-  const res = await fetch(url, {
+  const res = await fetchWithTimeout(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -70,7 +71,7 @@ async function sendWhatsApp(conn, item) {
 }
 
 export async function processCampaignBatch() {
-  if (!rateOk()) return false;
+  if (!tryClaimRateSlot()) return false;
   const pool = getPool();
   const conn = await pool.getConnection();
   try {
@@ -123,10 +124,18 @@ export async function processCampaignBatch() {
       return true;
     }
   } catch (e) {
-    await conn.rollback();
+    try { await conn.rollback(); } catch (_) {}
     console.error('[campaign]', e.message);
     return false;
   } finally {
+    // Recover stuck processing items (older than 5 minutes)
+    try {
+      await conn.query(
+        `UPDATE campaign_send_queue SET status = 'pending'
+         WHERE status = 'processing'
+           AND updated_at < DATE_SUB(NOW(), INTERVAL 5 MINUTE)`
+      );
+    } catch (_) {}
     conn.release();
   }
 }

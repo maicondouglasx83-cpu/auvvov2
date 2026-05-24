@@ -157,6 +157,33 @@ function auvvoPeerFromJid(jid) {
   return m ? m[1] : '';
 }
 
+function escHTML(str) {
+  if (!str) return '';
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+function sanitizeHTML(str) {
+  if (!str) return '';
+  // Remove dangerous tags and attributes, keep text + basic formatting
+  return String(str)
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+    .replace(/<iframe[^>]*>[\s\S]*?<\/iframe>/gi, '')
+    .replace(/<svg[^>]*>[\s\S]*?<\/svg>/gi, '')
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+    .replace(/\s*on\w+\s*=\s*("[^"]*"|'[^']*'|[^\s>]*)/gi, '')
+    .replace(/<img[^>]*>/gi, '')
+    .replace(/javascript\s*:/gi, '')
+    .replace(/<[^>]*>/g, function(match) {
+      // Allow only safe formatting tags, strip all attributes
+      const tagName = match.match(/<\/?(\w+)/);
+      if (tagName && /^(b|i|strong|em|br|p|u|s|del|code|pre|h[1-6]|ul|ol|li|a|blockquote)$/i.test(tagName[1])) {
+        if (match.startsWith('</')) return '</' + tagName[1] + '>';
+        return '<' + tagName[1] + '>';
+      }
+      return '';
+    });
+}
+
 function convDisplayName(log) {
   const peer = auvvoPeerFromJid(log.contact_jid || '');
   if (peer) return '+' + peer;
@@ -208,14 +235,14 @@ function renderList(filter='all', search='') {
     div.dataset.id = c.id;
     div.onclick = () => loadConv(c.id);
     div.innerHTML = `
-      <div class="conv-avatar" style="background:${c.avatarBg};color:${c.avatarColor}">${c.avatar}</div>
+      <div class="conv-avatar" style="background:${escHTML(c.avatarBg)};color:${escHTML(c.avatarColor)}">${escHTML(c.avatar)}</div>
       <div style="flex:1;overflow:hidden">
         <div style="display:flex;justify-content:space-between;align-items:center">
-          <strong style="font-size:.9375rem">${c.name}</strong>
-          <span style="font-size:.75rem;color:var(--text-muted)">${c.time}</span>
+          <strong style="font-size:.9375rem">${escHTML(c.name)}</strong>
+          <span style="font-size:.75rem;color:var(--text-muted)">${escHTML(c.time)}</span>
         </div>
-        <p style="font-size:.8125rem;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin:2px 0 4px">${c.lastMsg}</p>
-        <span class="badge ${c.badgeClass}" style="font-size:.65rem">${c.badge}</span>
+        <p style="font-size:.8125rem;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin:2px 0 4px">${escHTML(c.lastMsg)}</p>
+        <span class="badge ${escHTML(c.badgeClass)}" style="font-size:.65rem">${escHTML(c.badge)}</span>
       </div>
       ${c.status==='waiting_human'?'<div class="unread-dot"></div>':''}
     `;
@@ -322,7 +349,7 @@ async function loadConv(id) {
   document.getElementById('hdr-avatar').style.color = c.avatarColor;
   document.getElementById('hdr-name').textContent = c.name;
   const agName = agentNames[c.agentId] || 'Auvvo';
-  document.getElementById('hdr-status').innerHTML = `<i class="ph-fill ph-robot"></i> ` + I18N.attendedBy.replace('{agent}', agName);
+  document.getElementById('hdr-status').innerHTML = `<i class="ph-fill ph-robot"></i> ` + I18N.attendedBy.replace('{agent}', escHTML(agName));
   const hist = document.getElementById('chat-history');
   if (!c.messagesLoaded) {
     hist.innerHTML = '<p style="padding:16px;color:var(--text-muted)">Carregando mensagens…</p>';
@@ -358,7 +385,7 @@ async function loadConv(id) {
   (c.messages || []).forEach(m => {
     const div = document.createElement('div');
     div.className = 'chat-bubble ' + m.t;
-    div.innerHTML = m.text + (m.time ? `<span class="chat-time">${m.time}</span>` : '');
+    div.innerHTML = sanitizeHTML(m.text) + (m.time ? `<span class="chat-time">${escHTML(m.time)}</span>` : '');
     hist.appendChild(div);
   });
   if (!c.messages.length) {
@@ -398,17 +425,17 @@ function loadCrmSidebar(c) {
       const stages = d.stages || {};
       const mem = ct.memory_json || {};
       const memHtml = Object.keys(mem).length
-        ? Object.keys(mem).map(k => `<div style="margin-top:6px"><strong>${k}:</strong> ${mem[k]}</div>`).join('')
+        ? Object.keys(mem).map(k => `<div style="margin-top:6px"><strong>${escHTML(k)}:</strong> ${sanitizeHTML(String(mem[k]))}</div>`).join('')
         : '<span style="color:var(--text-muted)">—</span>';
       body.innerHTML = `
-        <div><strong>${ct.name || ct.phone || '—'}</strong></div>
-        <div style="margin-top:8px">Estágio: <strong>${(stages[ct.stage] && stages[ct.stage].label) || stages[ct.stage] || ct.stage}</strong></div>
-        ${ct.loss_reason ? `<div style="margin-top:6px;color:#B91C1C">Perda: ${ct.loss_reason}</div>` : ''}
+        <div><strong>${escHTML(ct.name || ct.phone || '—')}</strong></div>
+        <div style="margin-top:8px">Estágio: <strong>${escHTML((stages[ct.stage] && stages[ct.stage].label) || stages[ct.stage] || ct.stage)}</strong></div>
+        ${ct.loss_reason ? `<div style="margin-top:6px;color:#B91C1C">Perda: ${escHTML(ct.loss_reason)}</div>` : ''}
         <div style="margin-top:12px"><span style="font-size:.7rem;text-transform:uppercase;color:var(--text-muted)">Memória IA</span>${memHtml}</div>
-        <div style="margin-top:12px">${(ct.tags||[]).map(t=>'<span class="badge" style="margin:2px">'+t+'</span>').join('') || ''}</div>
+        <div style="margin-top:12px">${(ct.tags||[]).map(t=>'<span class="badge" style="margin:2px">'+escHTML(t)+'</span>').join('') || ''}</div>
         <div id="brain-actions-box" style="margin-top:14px"></div>`;
       if (link) {
-        link.href = `crm?contact=${ct.id}`;
+        link.href = `crm?contact=${encodeURIComponent(ct.id)}`;
         link.style.display = 'block';
       }
       loadBrainActions(c, ct.id);
@@ -556,7 +583,13 @@ function sendMsg() {
   const div = document.createElement('div');
   div.className = 'chat-bubble sent';
   div.dataset.clientMsgId = clientMsgId;
-  div.innerHTML = text + `<span class="chat-time">${t} <i class="ph-bold ph-user" style="font-size:.7rem"></i> <span class="mm-status" style="margin-left:6px;color:var(--text-muted)">${I18N.sending}</span></span>`;
+  div.textContent = '';
+  const textNode = document.createTextNode(text);
+  const span = document.createElement('span');
+  span.className = 'chat-time';
+  span.innerHTML = `${t} <i class="ph-bold ph-user" style="font-size:.7rem"></i> <span class="mm-status" style="margin-left:6px;color:var(--text-muted)">${I18N.sending}</span></span>`;
+  div.appendChild(textNode);
+  div.appendChild(span);
   hist.appendChild(div);
   hist.scrollTop = hist.scrollHeight;
   input.value = '';
@@ -627,7 +660,7 @@ function handleConversationEvent(ev) {
         if (hist) {
           const div = document.createElement('div');
           div.className = 'chat-bubble received';
-          div.innerHTML = preview + `<span class="chat-time">${t}</span>`;
+          div.innerHTML = sanitizeHTML(preview) + `<span class="chat-time">${escHTML(t)}</span>`;
           hist.appendChild(div);
           hist.scrollTop = hist.scrollHeight;
         }

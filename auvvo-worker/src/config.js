@@ -19,11 +19,18 @@ export const config = {
   pollMs: Math.max(100, parseInt(process.env.WORKER_POLL_MS || '300', 10)),
   maxAttempts: Math.max(1, parseInt(process.env.WORKER_AI_MAX_ATTEMPTS || '3', 10)),
   campaignPerMinute: Math.max(1, parseInt(process.env.CAMPAIGN_MSGS_PER_MINUTE || '12', 10)),
+  evolution: {
+    apiUrl: process.env.EVOLUTION_API_URL || 'http://localhost:8080',
+    apiKey: process.env.EVOLUTION_API_KEY || '',
+  },
 };
 
 export function workerHmacSecret() {
   const explicit = (process.env.WORKER_HMAC_SECRET || '').trim();
   if (explicit) return explicit;
+
+  // Fallback: deriva das credenciais DB (mesma logica do PHP auvvo_worker_hmac_secret)
+  // Funciona sem configuracao extra para single-server. Para multi-server, defina WORKER_HMAC_SECRET.
   const material = [
     'auvvo-internal-worker-v1',
     config.db.password,

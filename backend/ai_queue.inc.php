@@ -37,6 +37,8 @@ function auvvo_ai_enqueue_inbound_message(PDO $pdo, array $p): array
     $peerKey = 'peer:' . $lockPeer;
 
     try {
+        $pdo->beginTransaction();
+
         $stmt = $pdo->prepare(
             "SELECT id, body, pending_log_id FROM auvvo_ai_jobs
              WHERE agent_id = ? AND lock_peer = ? AND status IN ('debouncing','pending')
@@ -98,6 +100,7 @@ function auvvo_ai_enqueue_inbound_message(PDO $pdo, array $p): array
                 ]);
             }
 
+            $pdo->commit();
             return ['ok' => true, 'merged' => true, 'job_id' => (int) $existing['id']];
         }
 
@@ -149,8 +152,10 @@ function auvvo_ai_enqueue_inbound_message(PDO $pdo, array $p): array
             ]);
         }
 
+        $pdo->commit();
         return ['ok' => true, 'merged' => false, 'job_id' => (int) $pdo->lastInsertId()];
     } catch (PDOException $e) {
+        $pdo->rollBack();
         $dup = isset($e->errorInfo[1]) && (int) $e->errorInfo[1] === 1062;
         if ($dup) {
             return ['ok' => true, 'merged' => true, 'error' => 'duplicate'];

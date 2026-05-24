@@ -25,7 +25,7 @@ function auvvo_flow_validate_graph(PDO $pdo, int $userId, string $flowDataJson, 
     $triggers = [];
     $reachable = [];
     foreach ($nodes as $nodeId => $node) {
-        if ((string) ($node['class'] ?? '') === 'flow_trigger') {
+        if (auvvo_flow_node_type($node) === 'flow_trigger') {
             $triggers[] = (string) $nodeId;
         }
     }
@@ -40,7 +40,7 @@ function auvvo_flow_validate_graph(PDO $pdo, int $userId, string $flowDataJson, 
 
     foreach ($nodes as $nodeId => $node) {
         $nid = (string) $nodeId;
-        $class = (string) ($node['class'] ?? '');
+        $class = auvvo_flow_node_type($node);
         $data = is_array($node['data'] ?? null) ? $node['data'] : [];
 
         if ($class !== 'flow_trigger' && !isset($reachable[$nid])) {
@@ -78,6 +78,34 @@ function auvvo_flow_validate_graph(PDO $pdo, int $userId, string $flowDataJson, 
             }
         }
 
+        if ($class === 'flow_think') {
+            if ((int) ($data['agent_id'] ?? 0) <= 0) {
+                $errors[] = ['node_id' => $nid, 'message' => 'Pensar & Responder sem agente IA', 'severity' => 'block'];
+            }
+            if (trim((string) ($data['instructions'] ?? '')) === '') {
+                $msg = 'Instruções vazias no nó Pensar & Responder';
+                if ($forPublish) {
+                    $errors[] = ['node_id' => $nid, 'message' => $msg, 'severity' => 'block'];
+                } else {
+                    $warnings[] = ['node_id' => $nid, 'message' => $msg];
+                }
+            }
+        }
+
+        if ($class === 'flow_converse') {
+            if ((int) ($data['agent_id'] ?? 0) <= 0) {
+                $errors[] = ['node_id' => $nid, 'message' => 'Atendimento fluido sem agente IA', 'severity' => 'block'];
+            }
+            if (trim((string) ($data['instructions'] ?? $data['mission'] ?? '')) === '') {
+                $msg = 'Instruções vazias no Atendimento fluido';
+                if ($forPublish) {
+                    $errors[] = ['node_id' => $nid, 'message' => $msg, 'severity' => 'block'];
+                } else {
+                    $warnings[] = ['node_id' => $nid, 'message' => $msg];
+                }
+            }
+        }
+
         if ($class === 'flow_wait_reply') {
             $replyNext = auvvo_flow_next_node_ids($node, 'output_1');
             if ($replyNext === []) {
@@ -100,15 +128,19 @@ function auvvo_flow_validate_graph(PDO $pdo, int $userId, string $flowDataJson, 
     }
 
     $hasOutcome = false;
-    foreach ($reachable as $nid) {
-        $class = (string) ($nodes[$nid]['class'] ?? '');
-        if (in_array($class, ['flow_message', 'flow_agent', 'flow_action'], true)) {
+    foreach ($reachable as $nid => $_seen) {
+        $class = auvvo_flow_node_type($nodes[$nid] ?? []);
+        if (in_array($class, ['flow_message', 'flow_agent', 'flow_think', 'flow_converse', 'flow_action'], true)) {
             $hasOutcome = true;
             break;
         }
     }
     if (!$hasOutcome && $triggers !== []) {
-        $errors[] = ['node_id' => $triggers[0], 'message' => 'Nenhuma ação, mensagem ou agente conectado ao Início', 'severity' => 'block'];
+        $errors[] = [
+            'node_id' => $triggers[0],
+            'message' => 'Nenhuma ação, mensagem ou agente conectado ao Início — arraste do ponto de saída do gatilho',
+            'severity' => 'block',
+        ];
     }
 
     $blocks = array_filter($errors, static fn ($e) => ($e['severity'] ?? '') === 'block');
@@ -131,8 +163,11 @@ function auvvo_flow_validation_reachable(array $nodes, string $startId, array &$
     }
     $reachable[$startId] = true;
     $node = $nodes[$startId];
-    foreach (['output_1', 'output_2'] as $out) {
-        foreach (auvvo_flow_next_node_ids($node, $out) as $next) {
+    foreach ($node['outputs'] ?? [] as $outKey => $_out) {
+        if (!is_string($outKey) || !str_starts_with($outKey, 'output_')) {
+            continue;
+        }
+        foreach (auvvo_flow_next_node_ids($node, $outKey) as $next) {
             auvvo_flow_validation_reachable($nodes, $next, $reachable);
         }
     }
@@ -161,7 +196,7 @@ function auvvo_flow_publish_checklist(PDO $pdo, int $userId, string $flowDataJso
     $needsWa = false;
     $agentIds = [];
     foreach ($nodes as $node) {
-        $class = (string) ($node['class'] ?? '');
+        $class = auvvo_flow_node_type($node);
         $data = is_array($node['data'] ?? null) ? $node['data'] : [];
         if ($class === 'flow_delay') {
             $hasDelay = true;
@@ -169,7 +204,7 @@ function auvvo_flow_publish_checklist(PDO $pdo, int $userId, string $flowDataJso
         if ($class === 'flow_wait_reply') {
             $hasWait = true;
         }
-        if (in_array($class, ['flow_message', 'flow_agent'], true)) {
+        if (in_array($class, ['flow_message', 'flow_agent', 'flow_think', 'flow_converse'], true)) {
             $needsWa = true;
             if ((int) ($data['agent_id'] ?? 0) > 0) {
                 $agentIds[(int) $data['agent_id']] = true;
@@ -178,7 +213,11 @@ function auvvo_flow_publish_checklist(PDO $pdo, int $userId, string $flowDataJso
     }
 
     $conns = auvvo_whatsapp_connections_list($pdo, $userId);
-    $waOk = $conns !== [] && array_reduce($conns, static fn ($c, $x) => $c || ($x['status'] ?? '') === 'connected', false);
+    $waOk = $conns !== [] && array_reduce(
+        $conns,
+        static fn ($c, $x) => $c || auvvo_whatsapp_connection_is_online($x),
+        false
+    );
     if ($needsWa) {
         $items[] = [
             'id' => 'whatsapp',

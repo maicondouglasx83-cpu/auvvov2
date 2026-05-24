@@ -69,7 +69,7 @@ function auvvo_flow_wait_reply_pause(
             $keyword !== '' ? $keyword : null,
             json_encode($replyNodes, JSON_UNESCAPED_UNICODE),
             json_encode($timeoutNodes, JSON_UNESCAPED_UNICODE),
-            date('Y-m-d H:i:s', time() + $timeoutHours * 3600),
+            date('Y-m-d H:i:s', auvvo_unix_ts(time() + (int) ($timeoutHours * 3600))),
             'waiting',
             json_encode([
                 'trigger_type' => $triggerType,

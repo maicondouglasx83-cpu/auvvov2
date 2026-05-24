@@ -143,7 +143,7 @@ if ($llmApiKey === '') {
         try {
             $pdo->prepare('DELETE FROM conversation_logs WHERE id = ? AND agent_id = ?')
                 ->execute([$pendingLogId, $agentId]);
-        } catch (PDOException $e) {}
+        } catch (PDOException $e) { error_log('[Auvvo] litespeed worker log prune: ' . $e->getMessage()); }
     }
     exit(1);
 }
@@ -153,7 +153,7 @@ if ($dedupeKey !== '' && strpos($dedupeKey, 'fp:') === 0) {
     try {
         $pdo->prepare('DELETE FROM webhook_message_dedup WHERE agent_id = ? AND message_id = ?')
             ->execute([$agentId, $dedupeKey]);
-    } catch (PDOException $e) {}
+    } catch (PDOException $e) { error_log('[Auvvo] litespeed worker dedup prune: ' . $e->getMessage()); }
 }
 
 // Carrega dependências do pipeline

@@ -22,7 +22,20 @@ auvvo_run_migrations($pdo);
 
 $auvvoWebhookRunRouter = !defined('AUVVO_WEBHOOK_SKIP_HTTP_ROUTER') || !AUVVO_WEBHOOK_SKIP_HTTP_ROUTER;
 
-// Webhook público pela URL — proteja por firewall/IP na origem Evolution se precisar. O Evolution não usa segredo próprio aqui.
+// Verificar autenticação do webhook
+$webhookSecret = $_ENV['WEBHOOK_SECRET'] ?? null;
+if ($webhookSecret && $auvvoWebhookRunRouter) {
+    $providedSecret = $_SERVER['HTTP_X_WEBHOOK_SECRET']
+        ?? $_SERVER['HTTP_X_EVOLUTION_WEBHOOK_SECRET']
+        ?? $_GET['secret']
+        ?? null;
+
+    if (!$providedSecret || !hash_equals($webhookSecret, (string) $providedSecret)) {
+        http_response_code(403);
+        echo json_encode(['error' => 'unauthorized', 'message' => 'Invalid webhook secret']);
+        exit;
+    }
+}
 
 if ($auvvoWebhookRunRouter) {
 // Lê payload bruto
@@ -360,6 +373,25 @@ if ($event_type === 'MESSAGE' && !($data['Info']['IsFromMe'] ?? true)) {
             $contactRow = $crm->get((int) $agent['user_id'], (int) $upsert['id']);
             if ($contactRow) {
                 require_once __DIR__ . '/crm_automation_triggers.inc.php';
+                $contactRow = auvvo_crm_hydrate_contact($pdo, (int) $agent['user_id'], $contactRow);
+                require_once __DIR__ . '/crm_flow_converse.inc.php';
+                $converseHit = auvvo_flow_converse_inbound(
+                    $pdo,
+                    (int) $agent['user_id'],
+                    $contactRow,
+                    (string) $body,
+                    $connection_id
+                );
+                if (!empty($converseHit['handled'])) {
+                    if (!empty($converseHit['ai_handled'])) {
+                        require_once __DIR__ . '/crm_flow_agent.inc.php';
+                        auvvo_automation_mark_ai_handled();
+                    }
+                    auvvo_webhook_tracelog('exit', ['reason' => 'flow_converse', 'ended' => !empty($converseHit['ended'])]);
+                    http_response_code(200);
+                    echo json_encode(['ok' => true, 'info' => 'flow_converse'], JSON_UNESCAPED_UNICODE);
+                    exit;
+                }
                 auvvo_crm_fire_whatsapp_triggers(
                     $pdo,
                     (int) $agent['user_id'],
@@ -407,13 +439,16 @@ if ($event_type === 'MESSAGE' && !($data['Info']['IsFromMe'] ?? true)) {
         $modelStr = defined('OPENROUTER_DEFAULT_MODEL') ? OPENROUTER_DEFAULT_MODEL : 'openrouter/openai/gpt-4o-mini';
     }
     $isGemini     = strpos($modelStr, 'gemini') === 0;
+    $dsModel      = auvvo_is_deepseek_model($modelStr);
+    $isDeepSeek   = $dsModel !== '';
     // Roteamento de chave:
     // - 'auvvo-ai'       → OpenRouter (chave da plataforma)
     // - 'openrouter/...' → OpenRouter (legado, chave da plataforma)
-    // - 'provider/model' → OpenRouter (modelos com barra sem prefixo: deepseek/..., nvidia/..., openai/...)
+    // - 'deepseek/...'   → DeepSeek API direto (chave da plataforma)
+    // - 'provider/model' → OpenRouter (modelos com barra sem prefixo: nvidia/..., openai/...)
     // - 'gpt-4o' etc.    → OpenAI direto (chave do cliente)
     // - 'gemini-*'       → Gemini direto (chave do cliente)
-    $isOpenRouter = !$isGemini && (
+    $isOpenRouter = !$isGemini && !$isDeepSeek && (
         $modelStr === 'auvvo-ai'
         || strpos($modelStr, 'openrouter/') === 0
         || (strpos($modelStr, '/') !== false) // provider/model sem prefixo (deepseek/..., nvidia/..., etc.)
@@ -439,7 +474,15 @@ if ($event_type === 'MESSAGE' && !($data['Info']['IsFromMe'] ?? true)) {
         http_response_code(200); echo '{"ok":true,"info":"no openrouter platform key"}'; exit;
     }
 
-    if (!$isGemini && !$isOpenRouter && (!$settings || trim($settings['openai_key'] ?? '') === '')) {
+    $deepSeekPlatformKey = auvvo_deepseek_configured() ? trim((string) DEEPSEEK_API_KEY) : '';
+    if ($isDeepSeek && $deepSeekPlatformKey === '') {
+        auvvo_webhook_tracelog('exit', ['reason' => 'no_deepseek_key', 'model' => $modelStr]);
+        $fallback = "Olá! O motor de IA (DeepSeek) não está configurado. Contate o suporte. 😊";
+        sendEvolutionMessage($agent['evolution_token'], $evolution_instance_label, $remote_jid, $fallback);
+        http_response_code(200); echo '{"ok":true,"info":"no deepseek key"}'; exit;
+    }
+
+    if (!$isGemini && !$isOpenRouter && !$isDeepSeek && (!$settings || trim($settings['openai_key'] ?? '') === '')) {
         auvvo_webhook_tracelog('exit', ['reason' => 'no_openai_key', 'model' => $modelStr]);
         $fallback = "Olá! Nosso sistema está sendo configurado. Em breve retornaremos. 😊";
         sendEvolutionMessage($agent['evolution_token'], $evolution_instance_label, $remote_jid, $fallback);
@@ -448,7 +491,9 @@ if ($event_type === 'MESSAGE' && !($data['Info']['IsFromMe'] ?? true)) {
 
     $llmApiKey = $isGemini
         ? $effectiveGeminiKey
-        : ($isOpenRouter ? $openRouterPlatformKey : ($settings['openai_key'] ?? ''));
+        : ($isDeepSeek
+            ? $deepSeekPlatformKey
+            : ($isOpenRouter ? $openRouterPlatformKey : ($settings['openai_key'] ?? '')));
 
     // Verifica transbordo (handoff keywords)
     if ($agent['handoff_enabled'] ?? true) {
@@ -780,19 +825,14 @@ function getConversationHistoryRaw(PDO $pdo, int $agent_id, string $primary_jid,
         }
         $contactWhere = implode(' OR ', $conds);
 
-        // Histórico: só turnos de IA já concluídos (response_msg não vazio). Linhas só com inbound
-        // pendente NÃO entram — senão o modelo “acha” que ainda não respondeu (ex.: duas perguntas).
-        // O texto da mensagem atual vem sempre do parâmetro userMessage em callOpenAI, não desta query.
+        // Histórico: só turnos de IA reais (type=ai/handoff). NÃO incluir fallback — senão o modelo
+        // repete a mensagem genérica de erro ("Entendi! Só um instante…") ignorando o system prompt.
         $stmt = $pdo->prepare(
             "SELECT incoming_msg, response_msg, type
              FROM conversation_logs
              WHERE agent_id = ? AND ($contactWhere)
                AND (
                  type = 'handoff'
-                 OR (type = 'fallback' AND (
-                   CHAR_LENGTH(TRIM(COALESCE(response_msg,''))) > 0
-                   OR CHAR_LENGTH(TRIM(COALESCE(incoming_msg,''))) > 0
-                 ))
                  OR (type = 'ai' AND CHAR_LENGTH(TRIM(COALESCE(response_msg,''))) > 0)
                )
              ORDER BY id DESC
@@ -968,7 +1008,27 @@ function auvvo_llm_recover_truncated_chat_response(string $raw, bool $isGemini):
                     continue;
                 }
                 $buf .= 'u';
-            } else {
+    } elseif ($isDeepSeek) {
+        // =============== DEEPSEEK API (OpenAI-compatible) ===============
+        $url = DEEPSEEK_BASE_URL . '/chat/completions';
+
+        $messages = [['role' => 'system', 'content' => $systemPrompt]];
+        foreach ($history as $msg) { $messages[] = $msg; }
+        $messages[] = ['role' => 'user', 'content' => $userMessage];
+
+        $payload = [
+            'model'       => $dsModel,
+            'messages'    => $messages,
+            'max_tokens'  => max(1, (int) $maxTokens),
+            'temperature' => max(0.0, min(2.0, (float) $temperature)),
+            'stream'      => false,
+        ];
+
+        $headers = [
+            'Content-Type: application/json',
+            'Authorization: Bearer ' . $apiKey,
+        ];
+    } else {
                 $buf .= $nx;
             }
             ++$j;
@@ -1038,33 +1098,16 @@ function callOpenAI(
 
     $isAuvvoAI   = $model === 'auvvo-ai';
     $isGemini     = !$isAuvvoAI && strpos($model, 'gemini') === 0;
-    $isOpenRouter = !$isGemini && (
+    $dsModel      = auvvo_is_deepseek_model($model);
+    $isDeepSeek   = $dsModel !== '';
+    $isOpenRouter = !$isGemini && !$isDeepSeek && (
         $isAuvvoAI
         || strpos($model, 'openrouter/') === 0
         || strpos($model, '/') !== false // deepseek/..., openai/..., etc. (OpenRouter direto na chave da plataforma)
     );
 
-    // Resolve o model ID real a enviar à API:
-    if ($isAuvvoAI) {
-        // 'auvvo-ai' é um alias para Auvvo AI (OpenRouter).
-        // O modelo real vem do .env: OPENROUTER_DEFAULT_MODEL
-        $defaultModel = defined('OPENROUTER_DEFAULT_MODEL') ? trim(OPENROUTER_DEFAULT_MODEL) : 'openai/gpt-4o-mini';
-        // Remove prefixo interno 'openrouter/' se presente
-        $orModelId = strpos($defaultModel, 'openrouter/') === 0
-            ? substr($defaultModel, strlen('openrouter/'))
-            : $defaultModel;
-        // Se depois de remover o prefixo ainda não há barra (ex: owl-alpha), mantém o original
-        if (strpos($orModelId, '/') === false && strpos($defaultModel, 'openrouter/') === 0) {
-            $orModelId = $defaultModel;
-        }
-    } elseif (strpos($model, 'openrouter/') === 0) {
-        $afterPrefix = substr($model, strlen('openrouter/'));
-        // 'openrouter/openai/gpt-4o-mini' → 'openai/gpt-4o-mini'
-        // 'openrouter/owl-alpha'           → 'openrouter/owl-alpha' (mantém)
-        $orModelId = str_contains($afterPrefix, '/') ? $afterPrefix : $model;
-    } else {
-        $orModelId = $model; // já está no formato correto
-    }
+    // Resolve o model ID real a enviar à API OpenRouter:
+    $orModelId = $isOpenRouter ? auvvo_openrouter_model_id($isAuvvoAI ? 'auvvo-ai' : $model) : $model;
 
     if ($isGemini) {
         
@@ -1173,10 +1216,10 @@ function callOpenAI(
     // Modelos lentos / free tier costumam precisar >45s; padrão 120, teto 300.
     $curlTotalSec = max(45, min(300, (int) (($_ENV['WEBHOOK_LLM_CURL_TIMEOUT_SEC'] ?? '120') ?: 120)));
 
-    $providerTag = $isGemini ? 'gemini' : ($isOpenRouter ? 'openrouter' : 'openai');
+    $providerTag = $isGemini ? 'gemini' : ($isDeepSeek ? 'deepseek' : ($isOpenRouter ? 'openrouter' : 'openai'));
     auvvo_webhook_tracelog('llm_request', [
         'provider'      => $providerTag,
-        'model'         => $isOpenRouter ? $orModelId : $model,
+        'model'         => $isOpenRouter ? $orModelId : ($isDeepSeek ? $dsModel : $model),
         'payload_bytes' => strlen($jsonBody),
         'timeout_sec'   => $curlTotalSec,
         'sapi'          => PHP_SAPI,
@@ -1215,7 +1258,7 @@ function callOpenAI(
     $curlError   = '';
     $elapsedMs   = 0;
 
-    $providerTagHttp = $isGemini ? 'gemini' : ($isOpenRouter ? 'openrouter' : 'openai');
+    $providerTagHttp = $isGemini ? 'gemini' : ($isDeepSeek ? 'deepseek' : ($isOpenRouter ? 'openrouter' : 'openai'));
 
     for ($rateAttempt = 0; ; $rateAttempt++) {
         $rawHeaders = '';
@@ -1295,6 +1338,7 @@ function callOpenAI(
                 'detail'   => mb_substr($detail, 0, 500),
             ]);
             error_log('[Auvvo AI] HTTP ' . $httpCode . ' (' . $providerTagHttp . '): ' . mb_substr($detail, 0, 500));
+            $GLOBALS['auvvo_last_llm_error'] = 'HTTP ' . $httpCode . ': ' . mb_substr($detail, 0, 300);
 
             return null;
         }
@@ -1706,10 +1750,7 @@ function pruneFallbackThrottle(PDO $pdo, int $keepDays = 3): void {
     try {
         $pdo->prepare("DELETE FROM webhook_fallback_throttle WHERE created_at < DATE_SUB(NOW(), INTERVAL ? DAY)")
             ->execute([$keepDays]);
-    } catch (PDOException $e) {}
-}
-
-/**
+    } catch (PDOException $e) { error_log('[Auvvo] webhook fallback cleanup: ' . $e->getMessage()); }
  * Extrai o marcador de agendamento da resposta da IA.
  * Retorna ['clean_text'=>string, 'payload'=>array] ou null.
  */

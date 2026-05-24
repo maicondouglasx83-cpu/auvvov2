@@ -270,6 +270,77 @@ function auvvo_crm_render_message(PDO $pdo, string $msg, array $contact, array $
 }
 
 /**
+ * Envia texto fixo no WhatsApp (Evolution). Retorna ok/erro para logs do fluxo.
+ *
+ * @return array{ok:bool,error:string,sent:string}
+ */
+function auvvo_crm_send_whatsapp(
+    PDO $pdo,
+    int $userId,
+    array $config,
+    array $contact,
+    array $context = []
+): array {
+    $msg = trim((string) ($config['message'] ?? ''));
+    if ($msg === '') {
+        return ['ok' => false, 'error' => 'Mensagem vazia', 'sent' => ''];
+    }
+    if (empty($contact['jid'])) {
+        return ['ok' => false, 'error' => 'Contato sem JID WhatsApp', 'sent' => ''];
+    }
+
+    require_once __DIR__ . '/EvolutionAPI.php';
+    require_once __DIR__ . '/whatsapp_connections.inc.php';
+    require_once __DIR__ . '/crm_automation_motor.inc.php';
+
+    $agentId = (int) ($config['agent_id'] ?? $contact['agent_id'] ?? 0);
+    $connectionId = auvvo_crm_resolve_whatsapp_connection_id(
+        $pdo,
+        $userId,
+        (int) ($config['connection_id'] ?? 0),
+        $agentId,
+        $context,
+        $contact
+    );
+    if ($connectionId <= 0) {
+        return ['ok' => false, 'error' => 'Nenhuma conexão WhatsApp configurada', 'sent' => ''];
+    }
+
+    $token = auvvo_whatsapp_resolve_evolution_token(
+        $pdo,
+        $userId,
+        $connectionId,
+        $agentId > 0 ? $agentId : null
+    );
+    if (!$token) {
+        return ['ok' => false, 'error' => 'Token Evolution ausente na conexão #' . $connectionId, 'sent' => ''];
+    }
+
+    $digits = preg_replace('/\D/', '', explode('@', (string) $contact['jid'])[0] ?? '');
+    if ($digits === '') {
+        return ['ok' => false, 'error' => 'Telefone inválido no JID do contato', 'sent' => ''];
+    }
+
+    $rendered = auvvo_crm_render_message($pdo, $msg, $contact, $context);
+    if ($rendered === '') {
+        return ['ok' => false, 'error' => 'Mensagem renderizada vazia', 'sent' => ''];
+    }
+
+    try {
+        $uid = $agentId > 0 ? auvvo_evolution_user_id_for_agent($pdo, $agentId) : $userId;
+        $cred = auvvo_evolution_credentials($pdo, $uid);
+        $api = new EvolutionAPI($cred['url'], $cred['key']);
+        $api->sendText($token, $digits, $rendered);
+
+        return ['ok' => true, 'error' => '', 'sent' => $rendered];
+    } catch (Throwable $e) {
+        error_log('[Auvvo] automation send_whatsapp: ' . $e->getMessage());
+
+        return ['ok' => false, 'error' => 'Falha ao enviar: ' . $e->getMessage(), 'sent' => ''];
+    }
+}
+
+/**
  * Executa uma ação de automação imediatamente.
  */
 function auvvo_crm_execute_action(
@@ -296,11 +367,15 @@ function auvvo_crm_execute_action(
 
     if (auvvo_automation_is_simulate($context)) {
         $detail = auvvo_automation_simulate_action_detail($actionType, $config, $contact, $pdo, $userId, $context);
+        $nodeClass = trim((string) ($config['_node_class'] ?? ''));
+        if ($nodeClass === '') {
+            $nodeClass = $actionType === 'send_whatsapp' ? 'flow_message' : 'flow_action';
+        }
         auvvo_automation_run_log_step(
             $pdo,
             $context,
             (string) ($config['_node_id'] ?? 'action'),
-            'flow_action',
+            $nodeClass,
             (string) ($config['_node_label'] ?? $actionType),
             'simulated',
             $detail
@@ -396,30 +471,7 @@ function auvvo_crm_execute_action(
             break;
 
         case 'send_whatsapp':
-            $msg = (string) ($config['message'] ?? '');
-            $agentId = (int) ($config['agent_id'] ?? $contact['agent_id'] ?? 0);
-            $connectionId = (int) ($config['connection_id'] ?? $context['whatsapp_connection_id'] ?? 0);
-            if ($msg === '' || empty($contact['jid'])) {
-                break;
-            }
-            try {
-                require_once __DIR__ . '/EvolutionAPI.php';
-                require_once __DIR__ . '/whatsapp_connections.inc.php';
-                $token = auvvo_whatsapp_resolve_evolution_token($pdo, $userId, $connectionId > 0 ? $connectionId : null, $agentId > 0 ? $agentId : null);
-                if (!$token) {
-                    break;
-                }
-                $digits = preg_replace('/\D/', '', explode('@', (string) $contact['jid'])[0] ?? '');
-                if ($digits === '') {
-                    break;
-                }
-                $uid = $agentId > 0 ? auvvo_evolution_user_id_for_agent($pdo, $agentId) : $userId;
-                $cred = auvvo_evolution_credentials($pdo, $uid);
-                $api = new EvolutionAPI($cred['url'], $cred['key']);
-                $api->sendText($token, $digits, auvvo_crm_render_message($pdo, $msg, $contact, $context));
-            } catch (Throwable $e) {
-                error_log('[Auvvo] automation send_whatsapp: ' . $e->getMessage());
-            }
+            auvvo_crm_send_whatsapp($pdo, $userId, $config, $contact, $context);
             break;
 
         case 'invoke_agent':
@@ -627,7 +679,7 @@ function auvvo_crm_enqueue_steps(
             $stepConfig['_trigger_context'] = $context;
         }
         $cumulative += max(0, (int) ($step['delay_minutes'] ?? 0));
-        $runAt = date('Y-m-d H:i:s', time() + $cumulative * 60);
+        $runAt = date('Y-m-d H:i:s', auvvo_unix_ts(time() + $cumulative * 60));
         try {
             $pdo->prepare(
                 'INSERT INTO crm_automation_queue
@@ -667,7 +719,7 @@ function auvvo_crm_enqueue_single(
         return;
     }
     auvvo_run_migrations($pdo);
-    $runAt = date('Y-m-d H:i:s', time() + max(0, $delayMinutes) * 60);
+    $runAt = date('Y-m-d H:i:s', auvvo_unix_ts(time() + max(0, (int) $delayMinutes) * 60));
     if ($context !== []) {
         $actionConfig['_trigger_context'] = $context;
     }
@@ -938,7 +990,7 @@ function auvvo_crm_process_automation_queue(PDO $pdo, int $limit = 25): int
             } else {
                 // Backoff exponencial: 2^attempt minutos (1→2, 2→4, 3→8, 4→16 min)
                 $backoffMins = min(60, (int) pow(2, $attempts));
-                $nextRun = date('Y-m-d H:i:s', time() + $backoffMins * 60);
+                $nextRun = date('Y-m-d H:i:s', auvvo_unix_ts(time() + (int) $backoffMins * 60));
                 $pdo->prepare(
                     'UPDATE crm_automation_queue SET status = ?, last_error = ?, run_at = ? WHERE id = ?'
                 )->execute(['pending', $err, $nextRun, $qid]);

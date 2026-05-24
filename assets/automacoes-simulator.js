@@ -2,7 +2,14 @@
 (function () {
   const B = window.FLOW_BOOT || {};
   const API = window.API || 'backend/api.php';
-  const CSRF = document.getElementById('csrf-token')?.value || '';
+
+  function getCsrf() {
+    return document.getElementById('csrf-token')?.value
+      || B.csrf
+      || window.FLOW_BOOT?.csrf
+      || window.CSRF
+      || '';
+  }
 
   let chatHistory = [];
   let pausedRunId = 0;
@@ -19,7 +26,7 @@
 
   function connOptions() {
     const list = B.whatsappConnections || [];
-    return ['<option value="*">Qualquer conexão</option>']
+    return ['<option value="*">Qualquer conexão (*)</option>']
       .concat(list.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`))
       .join('');
   }
@@ -30,6 +37,42 @@
       .map((f) => `<option value="${f.id}" ${String(f.id) === String(cur) ? 'selected' : ''}>${esc(f.name)}${f.is_active == 1 ? '' : ' (rascunho)'}</option>`)
       .join('');
   }
+
+  /** Sincroniza painel de teste com o gatilho do canvas atual. */
+  function syncSimFromEditor() {
+    if (!document.getElementById('sim-use-editor')?.checked) return;
+    const exp = typeof window.getCurrentFlowExport === 'function' ? window.getCurrentFlowExport() : null;
+    const tr = typeof window.extractFlowTriggerFromExport === 'function' ? window.extractFlowTriggerFromExport(exp) : null;
+    if (!tr) return;
+
+    const typeSel = document.getElementById('sim-trigger-type');
+    if (typeSel) typeSel.value = tr.trigger_type;
+
+    if (['whatsapp_first', 'whatsapp_message'].includes(tr.trigger_type)) {
+      const conn = document.getElementById('sim-connection');
+      if (conn) {
+        const hasOpt = [...conn.options].some((o) => o.value === tr.trigger_value);
+        conn.value = hasOpt ? tr.trigger_value : '*';
+      }
+    } else if (tr.trigger_type === 'tag_added') {
+      const tag = document.getElementById('sim-trigger-tag');
+      if (tag && tr.trigger_value) tag.value = tr.trigger_value;
+    } else if (tr.trigger_type === 'stage_enter') {
+      const st = document.getElementById('sim-trigger-stage');
+      if (st && tr.trigger_value) st.value = tr.trigger_value;
+    } else if (tr.trigger_type === 'webhook_received') {
+      const wh = document.getElementById('sim-trigger-webhook');
+      if (wh && tr.trigger_value) wh.value = tr.trigger_value;
+    }
+
+    syncTriggerFields();
+    const hint = document.getElementById('sim-trigger-hint');
+    if (hint) {
+      hint.textContent = `Gatilho do canvas: ${tr.trigger_type} / ${tr.trigger_value}`;
+    }
+  }
+
+  window.syncSimFromEditor = syncSimFromEditor;
 
   function renderChat() {
     const el = document.getElementById('sim-chat-messages');
@@ -66,10 +109,10 @@
     el.innerHTML = steps
       .map((s) => {
         const st = s.status || 'ok';
-        const cls = st === 'simulated' ? 'sim-step--sim' : st === 'branch_no' ? 'sim-step--no' : st === 'skip' ? 'sim-step--skip' : 'sim-step--ok';
+        const cls = st === 'simulated' ? 'sim-step--sim' : st === 'branch_no' ? 'sim-step--no' : st === 'skip' || st === 'error' ? 'sim-step--skip' : 'sim-step--ok';
         let detail = s.detail || '';
         let responseHtml = '';
-        if (s.node_class === 'flow_agent' && detail.includes('\n')) {
+        if ((s.node_class === 'flow_agent' || s.node_class === 'flow_think' || s.node_class === 'flow_converse') && detail.includes('\n')) {
           const nl = detail.indexOf('\n');
           responseHtml = `<div class="sim-step-response">${esc(detail.slice(nl + 1))}</div>`;
           detail = detail.slice(0, nl);
@@ -102,12 +145,45 @@
     try {
       const ex = window.getCurrentFlowExport?.();
       const nodes = ex?.drawflow?.Home?.data || {};
-      const hasDelay = Object.values(nodes).some((n) => n.name === 'flow_delay' || n.name === 'flow_wait_reply');
+      const hasDelay = Object.values(nodes).some((n) => {
+        const t = n.class || n.name || '';
+        return t === 'flow_delay' || t === 'flow_wait_reply';
+      });
       if (!hasDelay) { el.hidden = true; return; }
-      const q = await (await fetch(API + '?action=crm_queue_stats')).json();
-      el.hidden = q.worker_alive !== false;
+      const q = await (await fetch(API + '?action=crm_automation_queue_stats')).json();
+      const alive = q.stats?.worker_alive !== false && q.worker_alive !== false;
+      el.hidden = alive;
       if (!el.hidden) el.textContent = 'Worker offline — nós de espera precisam do auvvo-worker (npm start).';
     } catch (e) { el.hidden = true; }
+  }
+
+  function stepBotText(s) {
+    if (!s.detail) return '';
+    if (s.node_class === 'flow_message') {
+      return s.detail.replace(/^WhatsApp \(simulado\): /, '').replace(/^WhatsApp: /, '');
+    }
+    if (s.node_class === 'flow_agent' || s.node_class === 'flow_think' || s.node_class === 'flow_converse') {
+      const idx = s.detail.indexOf('\n');
+      return idx >= 0 ? s.detail.slice(idx + 1).trim() : '';
+    }
+    if (s.node_class === 'flow_action' && s.detail.startsWith('WhatsApp (simulado):')) {
+      return s.detail.replace(/^WhatsApp \(simulado\): /, '');
+    }
+    return '';
+  }
+
+  function appendBotLinesFromSteps(steps) {
+    const botLines = (steps || [])
+      .flatMap((s) => {
+        const text = stepBotText(s);
+        if (!text) return [];
+        if (s.node_class === 'flow_think' && text.includes('\n---\n')) {
+          return text.split('\n---\n').map((part) => ({ text: part.trim(), ai: true }));
+        }
+        return [{ text, ai: s.node_class === 'flow_agent' || s.node_class === 'flow_think' || s.node_class === 'flow_converse' }];
+      })
+      .filter((x) => x.text);
+    botLines.forEach((x) => chatHistory.push({ type: 'bot', text: x.text, ai: x.ai }));
   }
 
   async function runSimulation() {
@@ -115,6 +191,8 @@
     if (!msg) return;
 
     const continueRun = pausedRunId > 0;
+    syncSimFromEditor();
+
     const triggerType = continueRun ? 'whatsapp_message' : (document.getElementById('sim-trigger-type')?.value || 'whatsapp_first');
     let triggerValue = '*';
     if (!continueRun) {
@@ -136,15 +214,17 @@
     renderChat();
 
     const fd = new FormData();
-    fd.append('csrf_token', CSRF);
+    fd.append('csrf_token', getCsrf());
     fd.append('action', 'crm_simulate_flow');
     if (continueRun) {
       fd.append('continue_run_id', String(pausedRunId));
     } else {
-      if (flowId > 0) fd.append('flow_id', String(flowId));
+      if (flowId > 0 && !useEditor) fd.append('flow_id', String(flowId));
       else if (useEditor && typeof window.getCurrentFlowExport === 'function') {
         const exported = window.getCurrentFlowExport();
         if (exported) fd.append('flow_data', JSON.stringify(exported));
+      } else if (flowId > 0) {
+        fd.append('flow_id', String(flowId));
       }
       fd.append('trigger_type', triggerType);
       fd.append('trigger_value', triggerValue);
@@ -167,34 +247,36 @@
         return;
       }
 
-      function stepBotText(s) {
-        if (!s.detail) return '';
-        if (s.node_class === 'flow_message') return s.detail.replace(/^WhatsApp \(simulado\): /, '');
-        if (s.node_class === 'flow_agent') {
-          const idx = s.detail.indexOf('\n');
-          return idx >= 0 ? s.detail.slice(idx + 1).trim() : '';
-        }
-        return '';
-      }
-      const botLines = (d.steps || [])
-        .map((s) => ({ text: stepBotText(s), ai: s.node_class === 'flow_agent' }))
-        .filter((x) => x.text);
-      if (botLines.length) {
-        botLines.forEach((x) => chatHistory.push({ type: 'bot', text: x.text, ai: x.ai }));
-      } else if (d.message) {
+      appendBotLinesFromSteps(d.steps);
+
+      if (!chatHistory.some((m) => m.type === 'bot') && d.message) {
         chatHistory.push({ type: 'system', text: d.message });
-      } else if (!continueRun) {
-        chatHistory.push({
-          type: 'system',
-          text: d.matched
-            ? `Fluxo executado (${d.status}) — ${(d.steps || []).length} passos`
-            : 'Gatilho não encontrou nó Início correspondente',
-        });
+      } else if (!chatHistory.some((m) => m.type === 'bot') && !continueRun) {
+        if (d.matched) {
+          chatHistory.push({
+            type: 'system',
+            text: `Fluxo executado (${d.status}) — ${(d.steps || []).length} passos`
+              + (d.matched_trigger ? ` · gatilho ${d.matched_trigger.type}/${d.matched_trigger.value}` : ''),
+          });
+        } else {
+          chatHistory.push({
+            type: 'system',
+            text: 'Gatilho não encontrou nó Início correspondente — clique «Sincronizar gatilho» ou ajuste o cenário à esquerda.',
+          });
+        }
       }
 
       pausedRunId = (d.waiting_reply || d.status === 'paused') && d.run_id ? d.run_id : 0;
       const banner = document.getElementById('sim-paused-banner');
-      if (banner) banner.hidden = pausedRunId <= 0;
+      if (banner) {
+        banner.hidden = pausedRunId <= 0;
+        if (pausedRunId > 0) {
+          const hasConverse = (d.steps || []).some((s) => s.node_class === 'flow_converse');
+          banner.querySelector('strong').textContent = hasConverse
+            ? 'Atendimento fluido ativo'
+            : 'Fluxo aguardando resposta';
+        }
+      }
 
       renderChat();
       renderSteps(d.steps || [], d.status);
@@ -231,6 +313,8 @@
       }
     });
     document.getElementById('sim-trigger-type')?.addEventListener('change', syncTriggerFields);
+    document.getElementById('sim-use-editor')?.addEventListener('change', syncSimFromEditor);
+    document.getElementById('sim-sync-trigger')?.addEventListener('click', syncSimFromEditor);
     document.getElementById('sim-reset-chat')?.addEventListener('click', () => {
       chatHistory = [];
       pausedRunId = 0;
@@ -246,12 +330,15 @@
     syncTriggerFields();
     loadFlowsSelect();
     checkWorkerWarn();
+    setTimeout(syncSimFromEditor, 300);
   }
 
   window.initAutomacoesSimulator = function () {
     bindSimulator();
     renderChat();
+    syncSimFromEditor();
   };
 
   window.refreshSimulatorFlows = loadFlowsSelect;
+  window.runFlowSimulation = runSimulation;
 })();

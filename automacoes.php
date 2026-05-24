@@ -70,8 +70,8 @@ foreach ($stagesByPipeline as $pid => $map) {
 
 <link rel="stylesheet" href="app.css">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/drawflow@0.0.60/dist/drawflow.min.css">
-<link rel="stylesheet" href="assets/automacoes-flow.css?v=20260524c">
-<link rel="stylesheet" href="assets/automacoes-lab.css?v=20260524c">
+<link rel="stylesheet" href="assets/automacoes-flow.css?v=20260521c">
+<link rel="stylesheet" href="assets/automacoes-lab.css?v=20260524d">
 
 <script src="https://unpkg.com/@phosphor-icons/web"></script>
 <script src="https://cdn.jsdelivr.net/npm/drawflow@0.0.60/dist/drawflow.min.js"></script>
@@ -153,17 +153,14 @@ foreach ($stagesByPipeline as $pid => $map) {
   <div id="queue-stats" class="queue-stats"></div>
   <div id="dedupe-warn-global"></div>
 
-  <div class="auto-main-tabs">
-    <button type="button" class="auto-main-tab active" id="tab-build" onclick="setAutomacoesMainTab('build')"><i class="ph-bold ph-tree-structure"></i> Construir</button>
-    <button type="button" class="auto-main-tab" id="tab-test" onclick="setAutomacoesMainTab('test')"><i class="ph-bold ph-chat-circle-dots"></i> Testar</button>
-    <button type="button" class="auto-main-tab" id="tab-runs" onclick="setAutomacoesMainTab('runs')"><i class="ph-bold ph-list-checks"></i> Execuções</button>
-  </div>
-
-  <div id="panel-build">
-  <div class="page-tabs-flow">
-    <button type="button" class="page-tab-flow active" id="tab-visual" onclick="setAutomacoesPageTab('visual')">Editor visual</button>
-    <button type="button" class="page-tab-flow page-tab-flow--legacy" id="tab-quick" onclick="setAutomacoesPageTab('quick')" title="Modo legado — prefira o editor visual">Regras legado</button>
-  </div>
+  <nav class="auto-nav" aria-label="Modos de automação">
+    <div class="auto-nav-tabs">
+      <button type="button" class="auto-nav-tab active" id="tab-visual" onclick="setAutomacoesTab('visual')"><i class="ph-bold ph-tree-structure"></i> Editor</button>
+      <button type="button" class="auto-nav-tab" id="tab-test" onclick="setAutomacoesTab('test')"><i class="ph-bold ph-chat-circle-dots"></i> Testar</button>
+      <button type="button" class="auto-nav-tab" id="tab-runs" onclick="setAutomacoesTab('runs')"><i class="ph-bold ph-list-checks"></i> Execuções</button>
+    </div>
+    <button type="button" class="auto-nav-legacy" id="tab-quick" onclick="setAutomacoesTab('quick')" title="Modo legado — prefira o editor visual">Regras legado</button>
+  </nav>
 
   <div id="panel-visual">
     <div class="flow-app">
@@ -210,22 +207,26 @@ foreach ($stagesByPipeline as $pid => $map) {
         </div>
         <div class="drawflow-wrap">
           <div id="drawflow"></div>
-          <div class="flow-palette">
-            <button type="button" class="flow-palette-btn" data-add-node="flow_trigger"><i class="ph-bold ph-play-circle"></i> Início</button>
-            <button type="button" class="flow-palette-btn" data-add-node="flow_condition"><i class="ph-bold ph-funnel"></i> Se</button>
-            <button type="button" class="flow-palette-btn flow-palette-btn--agent" data-add-node="flow_agent"><i class="ph-bold ph-robot"></i> Agente IA</button>
-            <button type="button" class="flow-palette-btn" data-add-node="flow_message"><i class="ph-bold ph-whatsapp-logo"></i> Mensagem</button>
-            <button type="button" class="flow-palette-btn" data-add-node="flow_action" data-add-preset='{"action_type":"move_stage","stage":"new","pipeline_id":0,"label":"Mover estágio CRM"}'><i class="ph-bold ph-columns"></i> Mover estágio</button>
-            <button type="button" class="flow-palette-btn" data-add-node="flow_action" data-add-preset='{"action_type":"add_tag","tag":"novo-lead","label":"Adicionar tag"}'><i class="ph-bold ph-tag"></i> Tag CRM</button>
-            <button type="button" class="flow-palette-btn" data-add-node="flow_wait_reply"><i class="ph-bold ph-chat-teardrop-dots"></i> Aguardar resposta</button>
-            <button type="button" class="flow-palette-btn" data-add-node="flow_delay"><i class="ph-bold ph-clock"></i> Esperar tempo</button>
-            <button type="button" class="flow-palette-btn" data-add-node="flow_action" data-add-preset='{"action_type":"http_preset","label":"HTTP integração"}'><i class="ph-bold ph-plugs-connected"></i> Integração</button>
-            <button type="button" class="flow-palette-btn flow-palette-btn--more" id="btn-palette-more" title="Blocos avançados"><i class="ph-bold ph-dots-three"></i> Mais</button>
-          </div>
-          <div class="flow-palette flow-palette--extra" id="flow-palette-extra" hidden>
-            <button type="button" class="flow-palette-btn" data-add-node="flow_randomizer"><i class="ph-bold ph-shuffle"></i> Random A/B</button>
-            <button type="button" class="flow-palette-btn" data-add-node="flow_memory"><i class="ph-bold ph-brain"></i> Memória IA</button>
-            <button type="button" class="flow-palette-btn" data-add-node="flow_action"><i class="ph-bold ph-lightning"></i> Ação avançada</button>
+          <div class="flow-palette-wrap">
+            <div class="flow-palette-popover" id="flow-palette-extra" hidden>
+              <button type="button" class="flow-palette-btn" data-add-node="flow_action" data-add-preset='{"action_type":"move_stage","stage":"new","pipeline_id":0,"label":"Mover estágio CRM"}'><i class="ph-bold ph-columns"></i> Mover estágio</button>
+              <button type="button" class="flow-palette-btn" data-add-node="flow_action" data-add-preset='{"action_type":"add_tag","tag":"novo-lead","label":"Adicionar tag"}'><i class="ph-bold ph-tag"></i> Tag CRM</button>
+              <button type="button" class="flow-palette-btn" data-add-node="flow_delay"><i class="ph-bold ph-clock"></i> Esperar tempo</button>
+              <button type="button" class="flow-palette-btn" data-add-node="flow_action" data-add-preset='{"action_type":"http_preset","label":"HTTP integração"}'><i class="ph-bold ph-plugs-connected"></i> Integração</button>
+              <button type="button" class="flow-palette-btn" data-add-node="flow_randomizer"><i class="ph-bold ph-shuffle"></i> Random A/B</button>
+              <button type="button" class="flow-palette-btn" data-add-node="flow_memory"><i class="ph-bold ph-brain"></i> Memória IA</button>
+              <button type="button" class="flow-palette-btn" data-add-node="flow_action"><i class="ph-bold ph-lightning"></i> Ação avançada</button>
+            </div>
+            <div class="flow-palette">
+              <button type="button" class="flow-palette-btn" data-add-node="flow_trigger"><i class="ph-bold ph-play-circle"></i> Início</button>
+              <button type="button" class="flow-palette-btn" data-add-node="flow_condition"><i class="ph-bold ph-funnel"></i> Condição</button>
+              <button type="button" class="flow-palette-btn flow-palette-btn--agent" data-add-node="flow_agent"><i class="ph-bold ph-robot"></i> Agente IA</button>
+              <button type="button" class="flow-palette-btn" data-add-node="flow_message"><i class="ph-bold ph-whatsapp-logo"></i> Mensagem</button>
+              <button type="button" class="flow-palette-btn flow-palette-btn--think" data-add-node="flow_think"><i class="ph-bold ph-lightbulb"></i> Pensar</button>
+              <button type="button" class="flow-palette-btn flow-palette-btn--converse" data-add-node="flow_converse"><i class="ph-bold ph-chats-circle"></i> Atendimento fluido</button>
+              <button type="button" class="flow-palette-btn" data-add-node="flow_wait_reply"><i class="ph-bold ph-chat-teardrop-dots"></i> Aguardar resposta</button>
+              <button type="button" class="flow-palette-btn flow-palette-btn--more" id="btn-palette-more" title="Mais blocos" aria-expanded="false"><i class="ph-bold ph-dots-three"></i> Mais</button>
+            </div>
           </div>
         </div>
         <aside class="flow-playground" id="flow-playground">
@@ -693,7 +694,6 @@ foreach ($stagesByPipeline as $pid => $map) {
 
   </div>
   </div><!-- panel-quick-rules -->
-  </div><!-- panel-build -->
 
   <div id="flow-publish-modal" class="flow-modal" hidden aria-hidden="true">
     <div class="flow-modal-backdrop"></div>
@@ -750,6 +750,8 @@ foreach ($stagesByPipeline as $pid => $map) {
             <option value="webhook_received">Webhook / integração</option>
             <option value="ltv_inactive">LTV — inativo</option>
           </select>
+          <p id="sim-trigger-hint" class="text-muted" style="font-size:.7rem;margin:6px 0 0"></p>
+          <button type="button" class="btn btn-outline" id="sim-sync-trigger" style="font-size:.75rem;margin-top:6px;width:100%">Sincronizar gatilho do editor</button>
         </div>
         <div class="sim-field" id="sim-wrap-connection">
           <label>Conexão</label>
@@ -783,7 +785,7 @@ foreach ($stagesByPipeline as $pid => $map) {
       <section class="sim-panel sim-chat">
         <h3>Chat de teste</h3>
         <div id="sim-paused-banner" class="sim-paused-banner" hidden>
-          <strong>Fluxo aguardando resposta</strong> — envie a próxima mensagem para continuar.
+          <strong>Conversa em andamento</strong> — envie mais mensagens como o lead para continuar o atendimento.
           <button type="button" class="btn btn-outline" id="sim-reset-session" style="font-size:.7rem;margin-left:8px">Nova sessão</button>
         </div>
         <div id="sim-worker-warn" class="sim-worker-warn" hidden></div>
@@ -1593,16 +1595,18 @@ window.FLOW_BOOT = <?= json_encode([
 ], JSON_UNESCAPED_UNICODE) ?>;
 
 </script>
-<script src="assets/automacoes-flow-templates.js?v=20260520v"></script>
+<script src="assets/automacoes-flow-config.js?v=20260523"></script>
+<script src="assets/automacoes-flow-templates.js?v=20260521c"></script>
 <script src="assets/auvvo-pack-flows.js?v=20260520v"></script>
-<script src="assets/automacoes-flow.js?v=20260524c"></script>
-<script src="assets/automacoes-improvements.js?v=20260524"></script>
-<script src="assets/automacoes-simulator.js?v=20260524"></script>
+<script src="assets/automacoes-flow.js?v=20260521c"></script>
+<script src="assets/automacoes-improvements.js?v=20260525b"></script>
+<script src="assets/automacoes-simulator.js?v=20260521c"></script>
 <script src="assets/automacoes-runs.js?v=20260524"></script>
 <script src="assets/automacoes-packs.js?v=20260522"></script>
 <script>
-window.setAutomacoesMainTab = function (tab) {
-  var panels = { build: 'panel-build', test: 'panel-test', runs: 'panel-runs' };
+window.setAutomacoesTab = function (tab) {
+  if (tab === 'build') tab = 'visual';
+  var panels = { visual: 'panel-visual', test: 'panel-test', runs: 'panel-runs', quick: 'panel-quick-rules' };
   Object.keys(panels).forEach(function (k) {
     var el = document.getElementById(panels[k]);
     if (el) el.style.display = tab === k ? 'block' : 'none';
@@ -1612,9 +1616,17 @@ window.setAutomacoesMainTab = function (tab) {
   if (tab === 'test') {
     if (typeof window.initAutomacoesSimulator === 'function') window.initAutomacoesSimulator();
     if (typeof window.refreshSimulatorFlows === 'function') window.refreshSimulatorFlows();
+    if (typeof window.syncSimFromEditor === 'function') window.syncSimFromEditor();
   }
   if (tab === 'runs' && typeof window.initAutomacoesRuns === 'function') window.initAutomacoesRuns();
-  if (tab === 'build' && typeof window.ensureFlowEditorInit === 'function') window.ensureFlowEditorInit();
+  if (tab === 'visual' && typeof window.ensureFlowEditorInit === 'function') window.ensureFlowEditorInit();
+};
+window.setAutomacoesMainTab = function (tab) {
+  var map = { build: 'visual', test: 'test', runs: 'runs' };
+  window.setAutomacoesTab(map[tab] || tab);
+};
+window.setAutomacoesPageTab = function (tab) {
+  window.setAutomacoesTab(tab === 'quick' ? 'quick' : 'visual');
 };
 </script>
 <script>

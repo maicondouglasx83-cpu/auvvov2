@@ -1,5 +1,15 @@
 <?php
 // login.php
+$isHttps = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') || ($_SERVER['SERVER_PORT'] ?? '') == 443;
+$isProduction = (defined('APP_ENV') && APP_ENV === 'production');
+session_set_cookie_params([
+    'lifetime' => 0,
+    'path'     => '/',
+    'domain'   => '',
+    'secure'   => $isProduction || $isHttps,
+    'httponly' => true,
+    'samesite' => 'Strict',
+]);
 session_start();
 require_once 'backend/db.php';
 require_once 'includes/i18n.php';
@@ -16,20 +26,41 @@ if (empty($_SESSION['csrf_token'])) {
 }
 
 $error = '';
+$success = '';
 
-// ── Rate Limiting por IP (sessão) ──────────────────────────────────────────
-$ip_key     = 'login_attempts_' . md5($_SERVER['REMOTE_ADDR'] ?? 'unknown');
-$attempts   = $_SESSION[$ip_key]['count']   ?? 0;
-$first_try  = $_SESSION[$ip_key]['first_at'] ?? time();
-$window     = 15 * 60;
-$max_tries  = 10;
+// ── Rate Limiting por IP real ──────────────────────────────────────────────
+$blocked = false;
+try {
+    $client_ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+    $check = $pdo->prepare(
+        "SELECT attempts, first_at FROM login_attempts WHERE ip = ? AND first_at > DATE_SUB(NOW(), INTERVAL 15 MINUTE)"
+    );
+    $check->execute([$client_ip]);
+    $rate = $check->fetch();
+    $attempts = (int) ($rate['attempts'] ?? 0);
+    $first_try = (int) ($rate['first_at'] ?? time());
+    $window = 15 * 60;
+    $max_tries = 10;
+    $blocked = $attempts >= $max_tries && (time() - $first_try) <= $window;
 
-if (time() - $first_try > $window) {
-    $_SESSION[$ip_key] = ['count' => 0, 'first_at' => time()];
-    $attempts = 0;
+    if (random_int(1, 100) === 1) {
+        $pdo->exec("DELETE FROM login_attempts WHERE first_at < DATE_SUB(NOW(), INTERVAL 1 HOUR)");
+    }
+} catch (PDOException $e) {
+    // Cria a tabela se nao existir
+    try {
+        $pdo->exec(
+            "CREATE TABLE IF NOT EXISTS login_attempts (
+                ip VARCHAR(45) NOT NULL PRIMARY KEY,
+                attempts INT UNSIGNED NOT NULL DEFAULT 1,
+                first_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+        );
+    } catch (PDOException $e2) {
+        error_log('[Auvvo] login_attempts table: ' . $e2->getMessage());
+    }
 }
-
-$blocked = $attempts >= $max_tries;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
@@ -50,17 +81,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             if ($user && password_verify($password, $user['password_hash'])) {
                 session_regenerate_id(true);
-                unset($_SESSION[$ip_key]);
+                try { $pdo->prepare("DELETE FROM login_attempts WHERE ip = ?")->execute([$client_ip]); } catch (PDOException $e) {}
                 $_SESSION['user_id']   = $user['id'];
                 $_SESSION['user_name'] = $user['name'];
                 $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
                 header('Location: dashboard');
                 exit;
             } else {
-                $_SESSION[$ip_key] = [
-                    'count'    => $attempts + 1,
-                    'first_at' => $first_try,
-                ];
+                try {
+                    $up = $pdo->prepare(
+                        "INSERT INTO login_attempts (ip, attempts, first_at) VALUES (?, 1, NOW())
+                         ON DUPLICATE KEY UPDATE attempts = attempts + 1"
+                    );
+                    $up->execute([$client_ip]);
+                } catch (PDOException $e) {}
                 $error = t('login_err_invalid');
             }
         } else {
@@ -165,7 +199,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 <div class="form-group">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                         <label class="form-label" style="margin-bottom: 0;"><?= t('login_pass_label') ?></label>
-                        <a href="#" style="font-size: 0.75rem; color: var(--text-muted); text-decoration: none;"><?= t('login_forgot') ?></a>
+                        <a href="esqueci-senha" style="font-size: 0.75rem; color: var(--text-muted); text-decoration: none;"><?= t('login_forgot') ?></a>
                     </div>
                     <input type="password" name="password" class="form-control" placeholder="<?= t('login_pass_ph') ?>"
                            <?= $blocked ? 'disabled' : '' ?> required>

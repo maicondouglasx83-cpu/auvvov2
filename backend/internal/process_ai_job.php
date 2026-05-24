@@ -122,7 +122,8 @@ if ($modelStr === '') {
     $modelStr = defined('OPENROUTER_DEFAULT_MODEL') ? OPENROUTER_DEFAULT_MODEL : 'openrouter/openai/gpt-4o-mini';
 }
 $isGemini = strpos($modelStr, 'gemini') === 0;
-$isOpenRouter = !$isGemini && (
+$isDeepSeek = auvvo_is_deepseek_model($modelStr) !== '';
+$isOpenRouter = !$isGemini && !$isDeepSeek && (
     $modelStr === 'auvvo-ai'
     || strpos($modelStr, 'openrouter/') === 0
     || strpos($modelStr, '/') !== false
@@ -131,20 +132,28 @@ $geminiUserKey = trim($settings['gemini_key'] ?? '');
 $geminiEnvKey  = defined('GEMINI_API_KEY') ? trim((string) GEMINI_API_KEY) : '';
 $effectiveGeminiKey = $geminiUserKey !== '' ? $geminiUserKey : $geminiEnvKey;
 $openRouterPlatformKey = defined('OPENROUTER_API_KEY') ? trim((string) OPENROUTER_API_KEY) : '';
+$deepSeekPlatformKey  = auvvo_deepseek_configured() ? trim((string) DEEPSEEK_API_KEY) : '';
 
 if ($isGemini && $effectiveGeminiKey === '') {
     internal_json(503, ['ok' => false, 'error' => 'no_gemini_key']);
 }
+if ($isDeepSeek && $deepSeekPlatformKey === '') {
+    internal_json(503, ['ok' => false, 'error' => 'no_deepseek_key']);
+}
 if ($isOpenRouter && $openRouterPlatformKey === '') {
     internal_json(503, ['ok' => false, 'error' => 'no_openrouter_key']);
 }
-if (!$isGemini && !$isOpenRouter && trim($settings['openai_key'] ?? '') === '') {
+if (!$isGemini && !$isOpenRouter && !$isDeepSeek && trim($settings['openai_key'] ?? '') === '') {
     internal_json(503, ['ok' => false, 'error' => 'no_openai_key']);
 }
 
 $llmApiKey = $isGemini
     ? $effectiveGeminiKey
-    : ($isOpenRouter ? $openRouterPlatformKey : ($settings['openai_key'] ?? ''));
+    : ($isDeepSeek
+        ? $deepSeekPlatformKey
+        : ($isOpenRouter
+            ? $openRouterPlatformKey
+            : ($settings['openai_key'] ?? '')));
 
 $GLOBALS['auvvo_worker_start_time'] = time();
 $GLOBALS['auvvo_webhook_trace_id']  = (string) ($job['trace_id'] ?? bin2hex(random_bytes(4)));

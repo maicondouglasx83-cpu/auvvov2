@@ -246,6 +246,42 @@ define('OPENROUTER_API_KEY',  $_ENV['OPENROUTER_API_KEY']  ?? '');
 /** Modelo padrão para agentes sem modelo configurado (deve ter prefixo 'openrouter/'). */
 define('OPENROUTER_DEFAULT_MODEL', trim((string)($_ENV['OPENROUTER_DEFAULT_MODEL'] ?? 'openrouter/openai/gpt-4o-mini')));
 
+/** Chave DeepSeek API — https://platform.deepseek.com/api_keys */
+define('DEEPSEEK_API_KEY', $_ENV['DEEPSEEK_API_KEY'] ?? '');
+/** Base URL da API DeepSeek (OpenAI-compatible) */
+define('DEEPSEEK_BASE_URL', trim((string)($_ENV['DEEPSEEK_BASE_URL'] ?? 'https://api.deepseek.com/v1')));
+
+/** Verifica se DeepSeek esta configurado (tem API key). */
+function auvvo_deepseek_configured(): bool {
+    return defined('DEEPSEEK_API_KEY') && DEEPSEEK_API_KEY !== '';
+}
+
+/** Detecta se o modelo e do DeepSeek (prefixo deepseek/ ou deepseek-chat/deepseek-reasoner). */
+function auvvo_is_deepseek_model(string $model): string {
+    $m = trim($model);
+    if (str_starts_with($m, 'deepseek/')) {
+        return substr($m, strlen('deepseek/'));
+    }
+    if ($m === 'deepseek-chat' || $m === 'deepseek-reasoner') {
+        return $m;
+    }
+    return '';
+}
+
+/** ID enviado à API OpenRouter (remove alias interno openrouter/ e auvvo-ai). */
+function auvvo_openrouter_model_id(string $model): string
+{
+    $model = trim($model);
+    if ($model === '' || $model === 'auvvo-ai') {
+        $model = OPENROUTER_DEFAULT_MODEL;
+    }
+    if (str_starts_with($model, 'openrouter/')) {
+        return substr($model, strlen('openrouter/'));
+    }
+
+    return $model;
+}
+
 // ==========================================================
 // ABACATEPAY — Assinaturas (Brasil, API v2)
 // https://docs.abacatepay.com/pages/reference/introduction
@@ -298,10 +334,9 @@ define(
 
 $dsn = "mysql:host=$host;dbname=$db;charset=$charset";
 $options = [
-    // Em dev: erros aparecem na tela. Em produção: silencioso (veja catch abaixo)
-    PDO::ATTR_ERRMODE            => IS_DEV ? PDO::ERRMODE_EXCEPTION : PDO::ERRMODE_SILENT,
+    PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
     PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-    PDO::ATTR_EMULATE_PREPARES   => false, // Previne SQL Injection
+    PDO::ATTR_EMULATE_PREPARES   => false,
 ];
 
 try {
@@ -317,8 +352,7 @@ try {
 }
 
 /**
- * Em produção o PDO pode estar em ERRMODE_SILENT: prepare/query podem falhar sem exceção.
- * Nunca encadeie $pdo->prepare(...)->execute(...) sem validar PDOStatement em caminhos críticos do webhook.
+ * Helper para verificar se a conexao PDO esta ativa.
  */
 function auvvo_pdo_ping(PDO $pdo): bool {
     $q = @$pdo->query('SELECT 1');
@@ -382,5 +416,15 @@ function auvvo_settings_enable_gcal_scheduling(PDO $pdo, int $userId): void
     } catch (Throwable $e) {
         error_log('[Auvvo] auvvo_settings_enable_gcal_scheduling: ' . $e->getMessage());
     }
+}
+
+/** Timestamp Unix seguro para date() — PHP 8.3+ não aceita float. */
+function auvvo_unix_ts(int|float|string|null $timestamp = null): int
+{
+    if ($timestamp === null || $timestamp === '') {
+        return time();
+    }
+
+    return (int) $timestamp;
 }
 ?>

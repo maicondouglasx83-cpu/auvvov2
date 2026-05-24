@@ -4,7 +4,10 @@
 (function () {
   const B = window.FLOW_BOOT || {};
   const API = B.api || 'backend/api.php';
-  const CSRF = B.csrf || '';
+
+  function getCsrf() {
+    return B.csrf || window.FLOW_BOOT?.csrf || window.CSRF || '';
+  }
 
   function flowStages() {
     const pid = getFlowPipelineId();
@@ -71,100 +74,14 @@
 
   window.onFlowPipelineChange = onFlowPipelineChange;
 
-  const TRIGGER_LABELS = {
-    whatsapp_first: 'Primeira mensagem WhatsApp',
-    whatsapp_message: 'Mensagem WhatsApp (Evolution)',
-    stage_enter: 'Lead entra no estágio',
-    tag_added: 'Tag adicionada',
-    contact_created: 'Lead criado',
-    webhook_received: 'Webhook / integração',
-    ltv_inactive: 'LTV — inativo',
-  };
-
-  const TRIGGER_OPTIONS = [
-    {
-      group: 'WhatsApp & Evolution',
-      items: [
-        { value: 'whatsapp_first', icon: 'ph-whatsapp-logo', color: '#059669', label: 'Primeira mensagem WhatsApp', hint: 'Webhook Evolution — lead novo' },
-        { value: 'whatsapp_message', icon: 'ph-chats-circle', color: '#0d9488', label: 'Qualquer mensagem recebida', hint: 'Cada mensagem no WhatsApp' },
-      ],
-    },
-    {
-      group: 'CRM & funil',
-      items: [
-        { value: 'stage_enter', icon: 'ph-columns', color: '#4338ca', label: 'Entrada em estágio', hint: 'Kanban / pipeline' },
-        { value: 'tag_added', icon: 'ph-tag', color: '#b45309', label: 'Tag adicionada', hint: 'Quando ganha uma tag' },
-        { value: 'contact_created', icon: 'ph-user-plus', color: '#0369a1', label: 'Lead criado', hint: 'Manual, webhook ou WhatsApp' },
-      ],
-    },
-    {
-      group: 'Integrações & LTV',
-      items: [
-        { value: 'webhook_received', icon: 'ph-plugs-connected', color: '#7c3aed', label: 'Webhook de entrada', hint: 'Hotmart, formulário, etc.' },
-        { value: 'ltv_inactive', icon: 'ph-chart-line-down', color: '#ca8a04', label: 'LTV — cliente inativo', hint: 'Ciclo de compra' },
-      ],
-    },
-  ];
-
-  const ACTION_LABELS = {
-    send_whatsapp: 'Enviar WhatsApp',
-    assign_agent: 'Atribuir agente',
-    move_stage: 'Mover estágio',
-    add_tag: 'Adicionar tag',
-    remove_tag: 'Remover tag',
-    pause_ai: 'Pausar IA',
-    resume_ai: 'Retomar IA',
-    invoke_agent: 'Acionar outro agente',
-    call_webhook: 'Webhook outbound',
-    set_memory: 'Memória IA',
-    google_sheets_append: 'Google Sheets',
-    http_preset: 'HTTP preset',
-    brain_mission: 'Missão para o cérebro',
-    clear_brain_mission: 'Limpar missão IA',
-  };
-
-  const MESSAGE_VARS = [
-    { key: 'nome', label: 'Nome' },
-    { key: 'telefone', label: 'Telefone' },
-    { key: 'email', label: 'E-mail' },
-    { key: 'empresa', label: 'Empresa' },
-    { key: 'estagio', label: 'Estágio' },
-    { key: 'agente', label: 'Agente' },
-    { key: 'mensagem', label: 'Msg gatilho' },
-    { key: 'mensagens_hoje', label: 'Msgs hoje' },
-    { key: 'sessao', label: 'Sessão (8)' },
-    { key: 'ultima_sessao', label: 'Última sessão' },
-    { key: 'tags', label: 'Tags' },
-    { key: 'memoria.origem', label: 'Memória' },
-  ];
-
-  const ACTION_ICON = {
-    send_whatsapp: { icon: 'ph-whatsapp-logo', color: '#059669' },
-    assign_agent: { icon: 'ph-user-switch', color: '#0369a1' },
-    invoke_agent: { icon: 'ph-robot', color: '#7c3aed' },
-    move_stage: { icon: 'ph-columns', color: '#4338ca' },
-    add_tag: { icon: 'ph-tag', color: '#b45309' },
-    remove_tag: { icon: 'ph-tag-simple', color: '#94a3b8' },
-    pause_ai: { icon: 'ph-pause-circle', color: '#ca8a04' },
-    resume_ai: { icon: 'ph-play-circle', color: '#047857' },
-    call_webhook: { icon: 'ph-plugs-connected', color: '#7c3aed' },
-    set_memory: { icon: 'ph-brain', color: '#6d28d9' },
-    google_sheets_append: { icon: 'ph-table', color: '#15803d' },
-    http_preset: { icon: 'ph-globe', color: '#0f766e' },
-    brain_mission: { icon: 'ph-brain', color: '#6d28d9' },
-    clear_brain_mission: { icon: 'ph-check-circle', color: '#6d28d9' },
-  };
-
-  const ACTION_OPTIONS = Object.keys(ACTION_LABELS).map((k) => {
-    const meta = ACTION_ICON[k] || { icon: 'ph-lightning', color: '#047857' };
-    return { value: k, label: ACTION_LABELS[k] || k, icon: meta.icon, color: meta.color, hint: k === 'send_whatsapp' ? 'Texto + variáveis' : '' };
-  });
-
-  const ACTION_OPTIONS_GROUPED = [
-    { group: 'WhatsApp & agentes', items: ACTION_OPTIONS.filter((o) => ['send_whatsapp', 'assign_agent', 'invoke_agent', 'pause_ai', 'resume_ai'].includes(o.value)) },
-    { group: 'CRM & cérebro', items: ACTION_OPTIONS.filter((o) => ['move_stage', 'add_tag', 'remove_tag', 'set_memory', 'brain_mission', 'clear_brain_mission'].includes(o.value)) },
-    { group: 'Integrações', items: ACTION_OPTIONS.filter((o) => ['call_webhook', 'http_preset', 'google_sheets_append'].includes(o.value)) },
-  ];
+  const C = window.FlowConfig || {};
+  const TRIGGER_LABELS = C.TRIGGER_LABELS || {};
+  const TRIGGER_OPTIONS = C.TRIGGER_OPTIONS || [];
+  const ACTION_LABELS = C.ACTION_LABELS || {};
+  const MESSAGE_VARS = C.MESSAGE_VARS || [];
+  const ACTION_ICON = C.ACTION_ICON || {};
+  const ACTION_OPTIONS = C.ACTION_OPTIONS || [];
+  const ACTION_OPTIONS_GROUPED = C.ACTION_OPTIONS_GROUPED || [];
 
   let editor = null;
   let currentFlowId = 0;
@@ -226,7 +143,9 @@
       flow_message: 'fn-msg',
       flow_memory: 'fn-memory',
       flow_agent: 'fn-agent',
+      flow_think: 'fn-think',
       flow_wait_reply: 'fn-wait-reply',
+      flow_converse: 'fn-converse',
     }[type] || 'fn-action';
     const icon = {
       flow_trigger: 'ph-play-circle',
@@ -237,7 +156,9 @@
       flow_message: 'ph-whatsapp-logo',
       flow_memory: 'ph-brain',
       flow_agent: 'ph-robot',
+      flow_think: 'ph-lightbulb',
       flow_wait_reply: 'ph-chat-teardrop-dots',
+      flow_converse: 'ph-chats-circle',
     }[type] || 'ph-circle';
     const st = stats || { in: 0, ok: 0, err: 0 };
     const err = stats && stats._errMsg ? `<div class="fn-err" title="${esc(stats._errMsg)}">⚠ ${esc(String(stats._errMsg).slice(0, 40))}</div>` : '';
@@ -316,6 +237,27 @@
           mission: '',
           mode: 'respond',
           label: 'Agente IA',
+        };
+      case 'flow_think':
+        return {
+          connection_id: (B.whatsappConnections && B.whatsappConnections[0]) ? B.whatsappConnections[0].id : 0,
+          agent_id: (B.agents && B.agents[0]) ? B.agents[0].id : 0,
+          instructions: 'Analise o contexto do lead e responda de forma acolhedora.',
+          message_count: 1,
+          include_context: 1,
+          send_whatsapp: 1,
+          memory_key: '',
+          label: 'Pensar & Responder',
+        };
+      case 'flow_converse':
+        return {
+          connection_id: (B.whatsappConnections && B.whatsappConnections[0]) ? B.whatsappConnections[0].id : 0,
+          agent_id: (B.agents && B.agents[0]) ? B.agents[0].id : 0,
+          instructions: 'Conduza um atendimento natural: entenda a necessidade, faça perguntas curtas e ajude o lead até resolver ou encaminhar.',
+          max_turns: 30,
+          end_keywords: 'tchau,obrigado,encerrar,finalizar',
+          end_tag: '',
+          label: 'Atendimento fluido',
         };
       case 'flow_wait_reply':
         return {
@@ -403,20 +345,43 @@
       const ag = (B.agents || []).find((a) => String(a.id) === String(data.agent_id));
       const conn = (B.whatsappConnections || []).find((c) => String(c.id) === String(data.connection_id));
       const mission = (data.mission || '').slice(0, 50);
+      const modeLabel = data.mode === 'tools_only' ? ' · só ferramentas' : data.mode === 'proactive' ? ' · proativo' : '';
       return {
         title: 'Agente IA',
-        sub: (ag ? ag.name : 'Agente') + (conn ? ' · ' + conn.name : ''),
+        sub: (ag ? ag.name : 'Agente') + (conn ? ' · ' + conn.name : '') + modeLabel,
         body: mission
           ? esc(mission) + (data.mission.length > 50 ? '…' : '')
           : '<em>Pensa e responde no WhatsApp</em>',
+      };
+    }
+    if (type === 'flow_think') {
+      const ag = (B.agents || []).find((a) => String(a.id) === String(data.agent_id));
+      const instr = (data.instructions || '').slice(0, 55);
+      const n = Math.max(1, Math.min(5, parseInt(data.message_count, 10) || 1));
+      return {
+        title: 'Pensar & Responder',
+        sub: (ag ? ag.name : 'Agente') + ' · ' + n + ' msg(s)',
+        body: instr ? esc(instr) + (data.instructions.length > 55 ? '…' : '') : '<em>Defina instruções</em>',
       };
     }
     if (type === 'flow_wait_reply') {
       const kw = (data.keyword_contains || '').trim();
       return {
         title: 'Aguardar resposta',
-        sub: 'Conversacional',
+        sub: 'Script (1 pausa)',
         body: `Timeout <strong>${data.timeout_hours || 24}h</strong>${kw ? ' · «' + esc(kw) + '»' : ''}<br><small>Azul = respondeu · vermelho = timeout</small>`,
+      };
+    }
+    if (type === 'flow_converse') {
+      const ag = (B.agents || []).find((a) => String(a.id) === String(data.agent_id));
+      const instr = (data.instructions || '').slice(0, 55);
+      const turns = parseInt(data.max_turns, 10) || 30;
+      return {
+        title: 'Atendimento fluido',
+        sub: (ag ? ag.name : 'Agente') + ' · até ' + turns + ' turnos',
+        body: instr
+          ? esc(instr) + (data.instructions.length > 55 ? '…' : '')
+          : '<em>IA contínua com histórico do WhatsApp</em>',
       };
     }
     if (type === 'flow_action') {
@@ -892,6 +857,10 @@
   let actionConnectionPicker = null;
   let agentNodeConnectionPicker = null;
   let agentNodeAgentPicker = null;
+  let thinkConnectionPicker = null;
+  let converseConnectionPicker = null;
+  let converseAgentPicker = null;
+  let thinkAgentPicker = null;
 
   function renderPropsPanel(nodeId) {
     const body = document.getElementById('flow-props-body');
@@ -1016,11 +985,32 @@
         ${propsField('Conexão (linha)', '<div class="auv-picker" id="picker-agent-connection"></div>')}
         ${propsField('Agente (cérebro)', '<div class="auv-picker" id="picker-agent-brain"></div>')}
         ${propsField('Modo', `<select class="auv-input auv-native-select" id="p-agent-mode">
-            <option value="respond" ${d.mode !== 'tools_only' ? 'selected' : ''}>Responder no WhatsApp</option>
+            <option value="respond" ${d.mode !== 'tools_only' && d.mode !== 'proactive' ? 'selected' : ''}>Responder no WhatsApp</option>
+            <option value="proactive" ${d.mode === 'proactive' ? 'selected' : ''}>Proativo (sem msg do lead — usa missão)</option>
             <option value="tools_only" ${d.mode === 'tools_only' ? 'selected' : ''}>Só executar ferramentas (sem texto extra)</option>
           </select>`)}
-        ${propsField('Missão (opcional)', varChipsHtml('p-agent-mission') + '<textarea class="auv-input auv-textarea" id="p-agent-mission" rows="4" placeholder="Ex.: Qualificar o lead e agendar demo">' + esc(d.mission || '') + '</textarea>', 'Instrução temporária para a próxima resposta IA')}
+        ${propsField('Missão (opcional)', varChipsHtml('p-agent-mission') + '<textarea class="auv-input auv-textarea" id="p-agent-mission" rows="4" placeholder="Ex.: Qualificar o lead e agendar demo">' + esc(d.mission || '') + '</textarea>', 'Instrução temporária — obrigatória no modo proativo')}
         <div class="props-callout">Quando este nó responde, a IA padrão do webhook <strong>não</strong> dispara de novo.</div>`;
+    } else if (type === 'flow_converse') {
+      html += `
+        <div class="props-callout props-callout-info"><strong>Atendente contínuo:</strong> após este nó, cada nova mensagem do lead no WhatsApp é respondida pela IA com histórico completo — sem precisar de gatilho a cada turno.</div>
+        ${propsField('Conexão (linha)', '<div class="auv-picker" id="picker-converse-connection"></div>')}
+        ${propsField('Agente (cérebro)', '<div class="auv-picker" id="picker-converse-agent"></div>')}
+        ${propsField('Instruções do atendimento', varChipsHtml('p-converse-instructions') + '<textarea class="auv-input auv-textarea" id="p-converse-instructions" rows="6" placeholder="Ex.: Qualifique interesse, tire dúvidas sobre planos e convide para demo">' + esc(d.instructions || '') + '</textarea>', 'Missão enquanto a sessão estiver ativa')}
+        ${propsField('Máx. turnos (0 = ilimitado)', '<input type="number" class="auv-input" id="p-converse-turns" min="0" max="100" value="' + (d.max_turns ?? 30) + '">', 'Conta respostas do lead na sessão')}
+        ${propsField('Encerrar se mensagem contém', '<input class="auv-input" id="p-converse-end-kw" value="' + esc(d.end_keywords || 'tchau,obrigado,encerrar,finalizar') + '" placeholder="tchau, obrigado">')}
+        ${propsField('Tag ao encerrar (opcional)', '<input class="auv-input" id="p-converse-end-tag" value="' + esc(d.end_tag || '') + '" placeholder="atendimento-concluido">')}
+        <div class="props-callout">Diferente de «Aguardar resposta» (script com timeout). Use com gatilho <em>Primeira mensagem</em> + boas-vindas opcionais.</div>`;
+    } else if (type === 'flow_think') {
+      html += `
+        <div class="props-callout props-callout-info">O agente <strong>pensa</strong> com IA usando suas instruções, gera até N mensagens e envia no WhatsApp (ou só grava na memória).</div>
+        ${propsField('Conexão (linha)', '<div class="auv-picker" id="picker-think-connection"></div>')}
+        ${propsField('Agente (cérebro)', '<div class="auv-picker" id="picker-think-agent"></div>')}
+        ${propsField('Instruções', varChipsHtml('p-think-instructions') + '<textarea class="auv-input auv-textarea" id="p-think-instructions" rows="5" placeholder="Ex.: Qualifique o interesse, apresente os 3 planos e convide para demo">' + esc(d.instructions || '') + '</textarea>', 'O que o agente deve pensar e como responder')}
+        ${propsField('Quantidade de mensagens', '<input type="number" class="auv-input" id="p-think-count" min="1" max="5" value="' + (d.message_count ?? 1) + '">', 'Máx. 5 mensagens sequenciais no WhatsApp')}
+        <label class="props-check"><input type="checkbox" id="p-think-context" ${d.include_context !== 0 ? 'checked' : ''}> Incluir mensagem do gatilho e dados do lead</label>
+        <label class="props-check"><input type="checkbox" id="p-think-send" ${d.send_whatsapp !== 0 ? 'checked' : ''}> Enviar no WhatsApp</label>
+        ${propsField('Gravar na memória (opcional)', '<input class="auv-input" id="p-think-memory" value="' + esc(d.memory_key || '') + '" placeholder="ex.: ultima_analise">', 'Salva JSON com mensagens e raciocínio')}`;
     } else if (type === 'flow_action') {
       html += `
         ${propsField('Tipo de ação', '<div class="auv-picker" id="picker-action-type"></div>')}
@@ -1118,6 +1108,24 @@
         data.mode = document.getElementById('p-agent-mode')?.value || 'respond';
         data.mission = document.getElementById('p-agent-mission')?.value?.trim() || '';
         data.label = 'Agente IA';
+      } else if (type === 'flow_think') {
+        data.connection_id = parseInt(thinkConnectionPicker?.getValue() || '0', 10) || 0;
+        data.agent_id = parseInt(thinkAgentPicker?.getValue() || '0', 10) || 0;
+        data.instructions = document.getElementById('p-think-instructions')?.value?.trim() || '';
+        data.message_count = parseInt(document.getElementById('p-think-count')?.value, 10) || 1;
+        data.include_context = document.getElementById('p-think-context')?.checked ? 1 : 0;
+        data.send_whatsapp = document.getElementById('p-think-send')?.checked ? 1 : 0;
+        data.memory_key = document.getElementById('p-think-memory')?.value?.trim() || '';
+        data.label = 'Pensar & Responder';
+      } else if (type === 'flow_converse') {
+        data.connection_id = parseInt(converseConnectionPicker?.getValue() || '0', 10) || 0;
+        data.agent_id = parseInt(converseAgentPicker?.getValue() || '0', 10) || 0;
+        data.instructions = document.getElementById('p-converse-instructions')?.value?.trim() || '';
+        data.max_turns = parseInt(document.getElementById('p-converse-turns')?.value, 10);
+        if (Number.isNaN(data.max_turns)) data.max_turns = 30;
+        data.end_keywords = document.getElementById('p-converse-end-kw')?.value?.trim() || '';
+        data.end_tag = document.getElementById('p-converse-end-tag')?.value?.trim() || '';
+        data.label = 'Atendimento fluido';
       } else if (type === 'flow_action') {
         data.action_type = actionTypePicker?.getValue() || 'assign_agent';
         syncActionFieldsToData(data);
@@ -1175,6 +1183,20 @@
       agentNodeAgentPicker = mountAgentPickerEl('picker-agent-brain', defaultAg, () => apply(), 'assign');
     }
 
+    if (type === 'flow_think') {
+      const defaultConn = d.connection_id || (B.whatsappConnections && B.whatsappConnections[0] ? B.whatsappConnections[0].id : 0);
+      const defaultAg = d.agent_id || (B.agents && B.agents[0] ? B.agents[0].id : 0);
+      thinkConnectionPicker = mountConnectionPickerEl('picker-think-connection', defaultConn, () => apply(), false);
+      thinkAgentPicker = mountAgentPickerEl('picker-think-agent', defaultAg, () => apply(), 'assign');
+    }
+
+    if (type === 'flow_converse') {
+      const defaultConn = d.connection_id || (B.whatsappConnections && B.whatsappConnections[0] ? B.whatsappConnections[0].id : 0);
+      const defaultAg = d.agent_id || (B.agents && B.agents[0] ? B.agents[0].id : 0);
+      converseConnectionPicker = mountConnectionPickerEl('picker-converse-connection', defaultConn, () => apply(), false);
+      converseAgentPicker = mountAgentPickerEl('picker-converse-agent', defaultAg, () => apply(), 'assign');
+    }
+
     if (type === 'flow_action') {
       actionTypePicker = mountAuvPicker('picker-action-type', ACTION_OPTIONS_GROUPED, d.action_type || 'assign_agent', (v) => {
         renderActionFields({ action_type: v }, nodeId, apply);
@@ -1191,6 +1213,8 @@
 
     bindVarChips(document.getElementById('flow-props-body'));
     bindVarChips(document.getElementById('p-agent-mission')?.parentElement);
+    bindVarChips(document.getElementById('p-think-instructions')?.parentElement);
+    bindVarChips(document.getElementById('p-converse-instructions')?.parentElement);
     const msgTa = document.getElementById('p-msg-text');
     if (msgTa) {
       const upd = () => {
@@ -1518,7 +1542,7 @@
 
   function applyTemplate(tpl) {
     closeTemplateModal();
-    const built = tpl.build(B.agents || []);
+    const built = tpl.build(B.agents || [], B.whatsappConnections || []);
     currentFlowId = 0;
     document.getElementById('flow-name').value = built.name || tpl.name;
     document.getElementById('flow-active').checked = false;
@@ -1531,8 +1555,11 @@
     Object.keys(editor.drawflow.drawflow.Home.data).forEach((nid) => refreshNodeVisual(nid));
     renderPropsPanel(null);
     loadFlowList();
+    if (typeof window.syncSimFromEditor === 'function') window.syncSimFromEditor();
     if (remapped.changed && typeof window.toast === 'function') {
       window.toast('Template aplicado. Estágios ajustados ao seu funil.', 'info');
+    } else if (typeof window.toast === 'function') {
+      window.toast('Template «' + (tpl.name || '') + '» aplicado — teste na aba Testar.', 'success');
     }
   }
 
@@ -1541,18 +1568,21 @@
     const grid = document.getElementById('flow-template-grid');
     if (!modal || !grid) return newFlowBlank();
     const templates = window.AUVVO_FLOW_TEMPLATES || [];
+    const sectorOrder = window.AUVVO_FLOW_TEMPLATE_SECTORS || [];
     const agentCount = (B.agents || []).length;
     const packHint =
       agentCount < 2
         ? `<div class="flow-tpl-hint"><i class="ph-bold ph-package"></i> Para testar <strong>vários agentes</strong> de uma vez, use <button type="button" class="flow-tpl-hint-link" id="flow-tpl-goto-pack">Pacote completo</button> na barra lateral.</div>`
         : '';
-    const sectors = [...new Set(templates.map((t) => t.sector))];
+    const sectors = sectorOrder.length
+      ? sectorOrder.filter((s) => templates.some((t) => t.sector === s))
+      : [...new Set(templates.map((t) => t.sector))];
     grid.innerHTML = packHint + sectors
       .map((sec) => {
         const items = templates.filter((t) => t.sector === sec);
         return `<div class="flow-tpl-sector"><h4>${esc(sec)}</h4><div class="flow-tpl-cards">${items
           .map(
-            (t) => `<button type="button" class="flow-tpl-card" data-tpl="${esc(t.id)}">
+            (t) => `<button type="button" class="flow-tpl-card${t.featured ? ' flow-tpl-card--featured' : ''}" data-tpl="${esc(t.id)}">
               <span class="flow-tpl-icon" style="background:${t.color}18;color:${t.color}"><i class="ph-bold ${t.icon}"></i></span>
               <strong>${esc(t.name)}</strong>
               <span>${esc(t.description)}</span>
@@ -1602,7 +1632,7 @@
     if (!currentFlowId) return;
     if (!confirm('Excluir este fluxo permanentemente?')) return;
     const fd = new FormData();
-    fd.append('csrf_token', CSRF);
+    fd.append('csrf_token', getCsrf());
     fd.append('action', 'crm_delete_flow');
     fd.append('id', currentFlowId);
     await fetch(API, { method: 'POST', body: fd });
@@ -1645,11 +1675,30 @@
     document.getElementById('flow-template-close')?.addEventListener('click', closeTemplateModal);
     document.querySelector('#flow-template-modal .flow-modal-backdrop')?.addEventListener('click', closeTemplateModal);
     document.getElementById('btn-flow-delete')?.addEventListener('click', deleteCurrentFlow);
+
+    function closePalettePopover() {
+      const extra = document.getElementById('flow-palette-extra');
+      const more = document.getElementById('btn-palette-more');
+      if (extra) extra.hidden = true;
+      if (more) {
+        more.classList.remove('active');
+        more.setAttribute('aria-expanded', 'false');
+      }
+    }
+
     function bindPaletteBtn(btn) {
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', (e) => {
         if (btn.id === 'btn-palette-more') {
+          e.stopPropagation();
           const extra = document.getElementById('flow-palette-extra');
-          if (extra) extra.hidden = !extra.hidden;
+          const more = document.getElementById('btn-palette-more');
+          if (!extra) return;
+          const open = extra.hidden;
+          extra.hidden = !open;
+          if (more) {
+            more.classList.toggle('active', open);
+            more.setAttribute('aria-expanded', open ? 'true' : 'false');
+          }
           return;
         }
         const t = btn.getAttribute('data-add-node');
@@ -1659,7 +1708,7 @@
         if (presetRaw) {
           try {
             preset = JSON.parse(presetRaw);
-          } catch (e) {}
+          } catch (err) {}
         }
         const cx = 200 + Math.random() * 200;
         const cy = 100 + Math.random() * 120;
@@ -1668,9 +1717,14 @@
           editor.selectNode(id);
           updateFlowRoutingSummary();
         }
+        closePalettePopover();
       });
     }
+
     document.querySelectorAll('[data-add-node], #btn-palette-more').forEach(bindPaletteBtn);
+    document.addEventListener('click', (e) => {
+      if (!e.target.closest('.flow-palette-wrap')) closePalettePopover();
+    });
     document.getElementById('zoom-in')?.addEventListener('click', () => editor.zoom_in());
     document.getElementById('zoom-out')?.addEventListener('click', () => editor.zoom_out());
     document.getElementById('zoom-reset')?.addEventListener('click', () => editor.zoom_reset());
@@ -1682,6 +1736,22 @@
   window.addWhatsAppJourney = addWhatsAppJourney;
   window.getCurrentFlowId = () => currentFlowId;
   window.getCurrentFlowExport = () => (editor ? editor.export() : null);
+
+  /** Lê gatilho do nó Início no canvas (para simulador / playground). */
+  window.extractFlowTriggerFromExport = function (exp) {
+    const nodes = exp?.drawflow?.Home?.data || {};
+    for (const node of Object.values(nodes)) {
+      const cls = node.class || node.name || '';
+      if (cls !== 'flow_trigger') continue;
+      const d = node.data || {};
+      const tt = d.trigger_type || 'whatsapp_first';
+      let tv = String(d.trigger_value ?? '*').trim() || '*';
+      if (tt === 'ltv_inactive') tv = 'default';
+      return { trigger_type: tt, trigger_value: tv };
+    }
+    return null;
+  };
+
   window.getFlowPipelineId = getFlowPipelineId;
   window.syncOpenPropsToEditor = syncOpenPropsToEditor;
   window.updateFlowPublishHint = updateFlowPublishHint;
@@ -1703,18 +1773,5 @@
   window.remapFlowExportStages = remapFlowExportStages;
   window.pipelineStageSlugs = pipelineStageSlugs;
 
-  window.setAutomacoesPageTab = function (tab) {
-    const visual = document.getElementById('panel-visual');
-    const quick = document.getElementById('panel-quick-rules');
-    const t1 = document.getElementById('tab-visual');
-    const t2 = document.getElementById('tab-quick');
-    const showQuick = tab === 'quick';
-    if (visual) visual.style.display = showQuick ? 'none' : 'block';
-    if (quick) quick.style.display = showQuick ? 'block' : 'none';
-    t1?.classList.toggle('active', !showQuick);
-    t2?.classList.toggle('active', showQuick);
-    if (!showQuick && typeof window.ensureFlowEditorInit === 'function') {
-      window.ensureFlowEditorInit();
-    }
-  };
+  // Navegação de abas — implementação em automacoes.php (setAutomacoesTab)
 })();

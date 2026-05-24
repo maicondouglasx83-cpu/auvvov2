@@ -55,7 +55,7 @@
       </div>`;
 
     document.getElementById('runs-open-flow')?.addEventListener('click', async () => {
-      if (typeof window.setAutomacoesMainTab === 'function') window.setAutomacoesMainTab('build');
+      if (typeof window.setAutomacoesTab === 'function') window.setAutomacoesTab('visual');
       if (typeof window.loadFlow === 'function' && run.flow_id) await window.loadFlow(run.flow_id);
     });
     document.getElementById('runs-highlight-node')?.addEventListener('click', (e) => {
@@ -65,7 +65,7 @@
     el.querySelectorAll('.runs-step-link').forEach((btn) => {
       btn.addEventListener('click', async () => {
         const nid = btn.getAttribute('data-node');
-        if (typeof window.setAutomacoesMainTab === 'function') window.setAutomacoesMainTab('build');
+        if (typeof window.setAutomacoesTab === 'function') window.setAutomacoesTab('visual');
         if (run.flow_id && typeof window.loadFlow === 'function') await window.loadFlow(run.flow_id);
         if (nid && typeof window.highlightFlowNode === 'function') window.highlightFlowNode(nid);
       });

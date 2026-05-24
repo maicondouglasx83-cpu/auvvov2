@@ -231,6 +231,8 @@ $panelTitles = [
 const CSRF = <?= json_encode($_SESSION['csrf_token']) ?>;
 const API = 'backend/api.php';
 
+function escHTML(str) { if (!str) return ''; return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+
 async function saveSheetsConfig() {
   const fd = new FormData();
   fd.append('csrf_token', CSRF);
@@ -252,9 +254,9 @@ async function testSheets() {
 async function loadSheetList() {
   const d = await (await fetch(API + '?action=google_sheets_list')).json();
   const el = document.getElementById('gs-files');
-  if (d.error) { el.innerHTML = '<span style="color:#B91C1C">' + d.message + '</span>'; return; }
+  if (d.error) { el.innerHTML = '<span style="color:#B91C1C">' + escHTML(d.message) + '</span>'; return; }
   el.innerHTML = (d.files || []).map(f =>
-    `<div style="padding:6px 0;border-bottom:1px solid #eee;cursor:pointer" onclick="document.getElementById('gs-spreadsheet-id').value='${f.id}'"><strong>${f.name}</strong><br><code style="font-size:.65rem">${f.id}</code></div>`
+    `<div style="padding:6px 0;border-bottom:1px solid #eee;cursor:pointer" onclick="document.getElementById('gs-spreadsheet-id').value='${escHTML(f.id)}'"><strong>${escHTML(f.name)}</strong><br><code style="font-size:.65rem">${escHTML(f.id)}</code></div>`
   ).join('') || 'Nenhuma planilha encontrada.';
 }
 
@@ -268,7 +270,7 @@ async function createApiKey() {
   const d = await (await fetch(API, { method: 'POST', body: fd })).json();
   if (d.error) return alert(d.message || 'Erro');
   document.getElementById('api-key-once').innerHTML =
-    '<div class="key-once"><strong>Copie agora — não exibimos de novo:</strong><br>' + d.key.api_key + '</div>';
+    '<div class="key-once"><strong>Copie agora — não exibimos de novo:</strong><br>' + escHTML(d.key.api_key) + '</div>';
   loadApiKeys();
 }
 
@@ -278,7 +280,7 @@ async function loadApiKeys() {
   if (!el) return;
   el.innerHTML = (d.keys || []).map(k =>
     `<div style="padding:10px 0;border-bottom:1px solid #eee;font-size:.8rem">
-      <strong>${k.name}</strong> <code>${k.api_key_prefix}…</code>
+      <strong>${escHTML(k.name)}</strong> <code>${escHTML(k.api_key_prefix)}…</code>
       ${k.is_active == 1 ? '' : ' (revogada)'}
       ${k.is_active == 1 ? `<button type="button" class="btn btn-secondary" style="padding:2px 8px;font-size:.7rem;margin-left:8px" onclick="revokeKey(${k.id})">Revogar</button>` : ''}
     </div>`
@@ -303,8 +305,8 @@ async function loadHttpPresets() {
   (d.presets || []).forEach(p => { window._httpPresets[p.id] = p; });
   el.innerHTML = (d.presets || []).map(p => `
     <div class="app-card" style="margin-bottom:10px;padding:14px">
-      <strong>#${p.id} ${p.name}</strong> <span class="badge badge-gray">${p.provider_slug}</span>
-      <div class="text-muted" style="font-size:.75rem;margin:6px 0">${p.target_url}</div>
+      <strong>#${p.id} ${escHTML(p.name)}</strong> <span class="badge badge-gray">${escHTML(p.provider_slug)}</span>
+      <div class="text-muted" style="font-size:.75rem;margin:6px 0">${escHTML(p.target_url)}</div>
       <button type="button" class="btn btn-secondary" style="font-size:.75rem;padding:4px 10px" onclick="editHttp(${p.id})">Editar</button>
       <button type="button" class="btn btn-secondary" style="font-size:.75rem;padding:4px 10px" onclick="deleteHttp(${p.id})">Remover</button>
     </div>`).join('') || '<p class="text-muted">Nenhum preset.</p>';

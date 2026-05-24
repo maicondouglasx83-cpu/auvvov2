@@ -116,6 +116,49 @@ function auvvo_crm_resolve_agent_id(int $nodeAgentId, array $contact, array $con
 }
 
 /**
+ * Linha WhatsApp efetiva: nó → gatilho → agente → primeira conexão online.
+ */
+function auvvo_crm_resolve_whatsapp_connection_id(
+    PDO $pdo,
+    int $userId,
+    int $connectionId,
+    int $agentId,
+    array $context,
+    array $contact
+): int {
+    require_once __DIR__ . '/whatsapp_connections.inc.php';
+
+    if ($connectionId > 0) {
+        return $connectionId;
+    }
+    $ctxConn = (int) ($context['whatsapp_connection_id'] ?? 0);
+    if ($ctxConn > 0) {
+        return $ctxConn;
+    }
+    if ($agentId > 0) {
+        $cid = auvvo_whatsapp_connection_id_for_agent($pdo, $userId, $agentId);
+        if ($cid > 0) {
+            return $cid;
+        }
+    }
+    $contactAgent = (int) ($contact['agent_id'] ?? 0);
+    if ($contactAgent > 0) {
+        $cid = auvvo_whatsapp_connection_id_for_agent($pdo, $userId, $contactAgent);
+        if ($cid > 0) {
+            return $cid;
+        }
+    }
+    $conns = auvvo_whatsapp_connections_list($pdo, $userId);
+    foreach ($conns as $c) {
+        if (auvvo_whatsapp_connection_is_online($c)) {
+            return (int) ($c['id'] ?? 0);
+        }
+    }
+
+    return (int) ($conns[0]['id'] ?? 0);
+}
+
+/**
  * Após assign/invoke no fluxo, qual agente deve responder IA / pausas neste webhook.
  *
  * @param array<string, mixed> $receivingAgent linha do webhook (agents row)

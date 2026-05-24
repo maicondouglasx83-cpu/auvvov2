@@ -434,6 +434,14 @@ function auvvo_whatsapp_connection_status_label(string $status): string
     };
 }
 
+/** Linha WhatsApp pronta para enviar/receber (Evolution + UI). */
+function auvvo_whatsapp_connection_is_online(array $conn): bool
+{
+    $st = strtolower(trim((string) ($conn['status'] ?? '')));
+
+    return in_array($st, ['online', 'connected', 'open'], true);
+}
+
 function auvvo_whatsapp_update_connection_status(PDO $pdo, string $token, string $instanceSlug, string $dbStatus): void
 {
     if ($token !== '') {

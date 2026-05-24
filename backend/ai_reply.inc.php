@@ -212,13 +212,17 @@ function auvvo_run_ai_reply(
         if (defined('IS_DEV') && IS_DEV) {
             file_put_contents(__DIR__ . '/webhook_debug.log', date('Y-m-d H:i:s') . " AI_RESPONSE FAILED (NULL)\n", FILE_APPEND);
         }
-        error_log('[Auvvo Webhook] Resposta nula da IA para agente #' . $agent['id'] . ' — fallback acionado.');
-        auvvo_webhook_tracelog('llm_null_fallback', ['agent_id' => (int) $agent['id']]);
+        error_log('[Auvvo Webhook] Resposta nula da IA para agente #' . $agent['id'] . ' — fallback acionado.'
+            . (!empty($GLOBALS['auvvo_last_llm_error']) ? ' Motivo: ' . $GLOBALS['auvvo_last_llm_error'] : ''));
+        auvvo_webhook_tracelog('llm_null_fallback', [
+            'agent_id' => (int) $agent['id'],
+            'reason'   => (string) ($GLOBALS['auvvo_last_llm_error'] ?? ''),
+        ]);
 
         $fallback = 'Entendi! Só um instante que vou acionar um especialista para te ajudar. 🙏';
         $sent     = false;
         $throttleDuplicate = false;
-        $bucket   = '10m_' . date('Ymd_Hi', floor(time() / 600) * 600);
+        $bucket   = '10m_' . date('Ymd_Hi', auvvo_unix_ts(floor(time() / 600) * 600));
         try {
             $st = $pdo->prepare(
                 'INSERT INTO webhook_fallback_throttle (agent_id, contact_jid, bucket) VALUES (?, ?, ?)'

@@ -26,7 +26,8 @@ function auvvo_flow_agent_resolve_llm(PDO $pdo, array $agent, array $settings): 
         $modelStr = defined('OPENROUTER_DEFAULT_MODEL') ? OPENROUTER_DEFAULT_MODEL : 'openrouter/openai/gpt-4o-mini';
     }
     $isGemini = strpos($modelStr, 'gemini') === 0;
-    $isOpenRouter = !$isGemini && (
+    $isDeepSeek = auvvo_is_deepseek_model($modelStr) !== '';
+    $isOpenRouter = !$isGemini && !$isDeepSeek && (
         $modelStr === 'auvvo-ai'
         || strpos($modelStr, 'openrouter/') === 0
         || strpos($modelStr, '/') !== false
@@ -35,15 +36,19 @@ function auvvo_flow_agent_resolve_llm(PDO $pdo, array $agent, array $settings): 
     $geminiEnvKey = defined('GEMINI_API_KEY') ? trim((string) GEMINI_API_KEY) : '';
     $effectiveGeminiKey = $geminiUserKey !== '' ? $geminiUserKey : $geminiEnvKey;
     $openRouterPlatformKey = defined('OPENROUTER_API_KEY') ? trim((string) OPENROUTER_API_KEY) : '';
+    $deepSeekPlatformKey = auvvo_deepseek_configured() ? trim((string) DEEPSEEK_API_KEY) : '';
 
     if ($isGemini) {
-        return ['openai' => false, 'gemini' => true, 'openrouter' => false, 'model' => $modelStr, 'key' => $effectiveGeminiKey];
+        return ['openai' => false, 'gemini' => true, 'openrouter' => false, 'deepseek' => false, 'model' => $modelStr, 'key' => $effectiveGeminiKey];
+    }
+    if ($isDeepSeek) {
+        return ['openai' => false, 'gemini' => false, 'openrouter' => false, 'deepseek' => true, 'model' => $modelStr, 'key' => $deepSeekPlatformKey];
     }
     if ($isOpenRouter) {
-        return ['openai' => false, 'gemini' => false, 'openrouter' => true, 'model' => $modelStr, 'key' => $openRouterPlatformKey];
+        return ['openai' => false, 'gemini' => false, 'openrouter' => true, 'deepseek' => false, 'model' => $modelStr, 'key' => $openRouterPlatformKey];
     }
 
-    return ['openai' => true, 'gemini' => false, 'openrouter' => false, 'model' => $modelStr, 'key' => trim($settings['openai_key'] ?? '')];
+    return ['openai' => true, 'gemini' => false, 'openrouter' => false, 'deepseek' => false, 'model' => $modelStr, 'key' => trim($settings['openai_key'] ?? '')];
 }
 
 /**
@@ -205,7 +210,13 @@ function auvvo_flow_run_agent_node(
     }
 
     if ($body === '') {
-        return ['ok' => false, 'detail' => 'Sem mensagem de gatilho para responder'];
+        if ($mission !== '') {
+            $body = $mission;
+        } elseif ($mode === 'proactive') {
+            $body = 'Olá';
+        } else {
+            return ['ok' => false, 'detail' => 'Sem mensagem de gatilho — use missão ou gatilho WhatsApp'];
+        }
     }
 
     require_once __DIR__ . '/ai_reply.inc.php';
@@ -236,6 +247,251 @@ function auvvo_flow_run_agent_node(
     } catch (Throwable $e) {
         return ['ok' => false, 'detail' => 'Falha agente IA: ' . $e->getMessage()];
     }
+}
+
+/**
+ * Nó Pensar & Responder — IA gera N mensagens com instruções e envia no WhatsApp.
+ *
+ * @param array<string,mixed> $data
+ * @return array{ok:bool,detail:string,response?:string}
+ */
+function auvvo_flow_run_think_node(
+    PDO $pdo,
+    int $userId,
+    array $data,
+    array &$contact,
+    array $context,
+    string $nodeId,
+    string $nodeLabel
+): array {
+    $agentId = auvvo_crm_resolve_agent_id((int) ($data['agent_id'] ?? 0), $contact, $context);
+    $connectionId = auvvo_crm_resolve_whatsapp_connection_id(
+        $pdo,
+        $userId,
+        (int) ($data['connection_id'] ?? 0),
+        $agentId,
+        $context,
+        $contact
+    );
+    $instructions = trim((string) ($data['instructions'] ?? ''));
+    $messageCount = max(1, min(5, (int) ($data['message_count'] ?? 1)));
+    $includeContext = !isset($data['include_context']) || !empty($data['include_context']);
+    $memoryKey = trim((string) ($data['memory_key'] ?? ''));
+    $sendWa = !isset($data['send_whatsapp']) || !empty($data['send_whatsapp']);
+    $body = trim((string) ($context['message_body'] ?? ''));
+    $simulate = auvvo_automation_is_simulate($context);
+    $useLlm = !empty($context['simulate_use_llm']);
+
+    if ($agentId <= 0) {
+        return ['ok' => false, 'detail' => 'Agente IA não configurado'];
+    }
+    if ($instructions === '') {
+        return ['ok' => false, 'detail' => 'Instruções vazias — descreva o que o agente deve pensar/responder'];
+    }
+
+    $brain = auvvo_whatsapp_load_agent_brain($pdo, $userId, $agentId);
+    if (!$brain) {
+        return ['ok' => false, 'detail' => 'Agente #' . $agentId . ' não encontrado'];
+    }
+    if ($connectionId > 0) {
+        $conn = auvvo_whatsapp_connection_get($pdo, $userId, $connectionId);
+        if ($conn) {
+            $brain = auvvo_whatsapp_attach_connection_to_agent($brain, $conn);
+        }
+    }
+
+    $agentName = (string) ($brain['name'] ?? 'Agente');
+    $instructionsRendered = auvvo_crm_render_message($pdo, $instructions, $contact, $context);
+
+    if ($simulate && !$useLlm) {
+        $preview = '[Simulação] ' . $messageCount . ' msg(s) com instruções: «' . mb_substr($instructionsRendered, 0, 180) . '»';
+        if ($body !== '' && $includeContext) {
+            $preview .= ' — contexto: «' . mb_substr($body, 0, 80) . '»';
+        }
+
+        return ['ok' => true, 'detail' => 'Pensar & Responder (simulado): ' . $agentName, 'response' => $preview];
+    }
+
+    $stmt = $pdo->prepare(
+        'SELECT openai_key, gemini_key, company_name, company_niche, company_site FROM settings WHERE user_id = ? LIMIT 1'
+    );
+    $stmt->execute([$userId]);
+    $settings = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+    $llm = auvvo_flow_agent_resolve_llm($pdo, $brain, $settings);
+    if ($llm['key'] === '') {
+        return ['ok' => false, 'detail' => 'Chave de IA não configurada'];
+    }
+
+    $contextBlock = '';
+    if ($includeContext) {
+        $vars = auvvo_crm_message_vars($pdo, $contact, $context);
+        $parts = [];
+        if ($body !== '') {
+            $parts[] = 'Mensagem do lead: ' . $body;
+        }
+        if (!empty($vars['nome'])) {
+            $parts[] = 'Nome: ' . $vars['nome'];
+        }
+        if (!empty($vars['estagio'])) {
+            $parts[] = 'Estágio: ' . $vars['estagio'];
+        }
+        if (!empty($vars['tags'])) {
+            $parts[] = 'Tags: ' . $vars['tags'];
+        }
+        $contextBlock = $parts !== [] ? implode("\n", $parts) : 'Sem contexto adicional.';
+    }
+
+    $prompt = "Você é o agente \"{$agentName}\" em um fluxo automatizado de WhatsApp.\n\n"
+        . "INSTRUÇÕES DO FLUXO:\n{$instructionsRendered}\n\n";
+    if ($includeContext) {
+        $prompt .= "CONTEXTO DO LEAD:\n{$contextBlock}\n\n";
+    }
+    $prompt .= "Gere exatamente {$messageCount} mensagem(ns) separada(s) para enviar ao lead no WhatsApp.\n"
+        . "Responda SOMENTE com JSON válido neste formato:\n"
+        . "{\"messages\":[\"texto1\",\"texto2\"],\"reasoning\":\"breve nota interna\"}\n"
+        . "Cada mensagem deve ser curta, natural e pronta para WhatsApp (sem markdown).";
+
+    if (!defined('AUVVO_WEBHOOK_SKIP_HTTP_ROUTER')) {
+        define('AUVVO_WEBHOOK_SKIP_HTTP_ROUTER', true);
+    }
+    require_once __DIR__ . '/webhook_evolution.php';
+
+    $rawLlm = callOpenAI(
+        $llm['key'],
+        $llm['model'],
+        'Você gera respostas estruturadas para automação WhatsApp. Sempre retorne JSON válido.',
+        $prompt,
+        [],
+        1200,
+        0.6,
+        'auvvo-think-' . $agentId
+    );
+
+    if ($rawLlm === null || trim((string) $rawLlm) === '') {
+        return ['ok' => false, 'detail' => 'IA não retornou resposta'];
+    }
+
+    $parsed = auvvo_flow_think_parse_llm_json((string) $rawLlm, $messageCount);
+    if ($parsed['messages'] === []) {
+        return ['ok' => false, 'detail' => 'IA retornou formato inválido: ' . mb_substr((string) $rawLlm, 0, 200)];
+    }
+
+    $messages = $parsed['messages'];
+    $reasoning = $parsed['reasoning'];
+
+    if ($memoryKey !== '' && !empty($contact['jid'])) {
+        require_once __DIR__ . '/context_memory.inc.php';
+        auvvo_contact_memory_merge($pdo, $userId, (string) $contact['jid'], [
+            $memoryKey => json_encode(['messages' => $messages, 'reasoning' => $reasoning], JSON_UNESCAPED_UNICODE),
+        ]);
+        $contact = auvvo_crm_hydrate_contact($pdo, $userId, $contact);
+    }
+
+    if ($simulate) {
+        $joined = implode("\n---\n", $messages);
+        $detail = 'Pensar & Responder (LLM): ' . $agentName;
+        if ($reasoning !== '') {
+            $detail .= ' — ' . mb_substr($reasoning, 0, 120);
+        }
+
+        return ['ok' => true, 'detail' => $detail, 'response' => $joined];
+    }
+
+    if (!$sendWa) {
+        return [
+            'ok' => true,
+            'detail' => 'Pensamento gravado (' . count($messages) . ' msg) — envio WhatsApp desativado',
+            'response' => implode("\n---\n", $messages),
+        ];
+    }
+
+    if (empty($contact['jid'])) {
+        return ['ok' => false, 'detail' => 'Contato sem JID para enviar mensagens'];
+    }
+    if (empty($brain['evolution_token'])) {
+        return ['ok' => false, 'detail' => 'Conexão WhatsApp sem token'];
+    }
+
+    $sentLines = [];
+    $failures = [];
+    foreach ($messages as $i => $msgText) {
+        $msgText = trim((string) $msgText);
+        if ($msgText === '') {
+            continue;
+        }
+        $send = auvvo_crm_send_whatsapp($pdo, $userId, [
+            'connection_id' => $connectionId,
+            'agent_id'      => $agentId,
+            'message'       => $msgText,
+        ], $contact, $context);
+        if ($send['ok']) {
+            $sentLines[] = $send['sent'];
+            if ($i < count($messages) - 1) {
+                usleep(800000);
+            }
+        } else {
+            $failures[] = $send['error'];
+        }
+    }
+
+    if ($sentLines === []) {
+        return ['ok' => false, 'detail' => 'Nenhuma mensagem enviada: ' . implode('; ', $failures)];
+    }
+
+    auvvo_automation_mark_ai_handled();
+
+    $detail = count($sentLines) . ' mensagem(ns) enviada(s)';
+    if ($reasoning !== '') {
+        $detail .= ' — ' . mb_substr($reasoning, 0, 120);
+    }
+    if ($failures !== []) {
+        $detail .= ' (parcial: ' . implode('; ', $failures) . ')';
+    }
+
+    return ['ok' => true, 'detail' => $detail, 'response' => implode("\n---\n", $sentLines)];
+}
+
+/**
+ * @return array{messages:list<string>,reasoning:string}
+ */
+function auvvo_flow_think_parse_llm_json(string $raw, int $expectedCount): array
+{
+    $raw = trim($raw);
+    if (preg_match('/\{[\s\S]*\}/', $raw, $m)) {
+        $raw = $m[0];
+    }
+    $data = json_decode($raw, true);
+    if (is_array($data) && !empty($data['messages']) && is_array($data['messages'])) {
+        $msgs = [];
+        foreach ($data['messages'] as $item) {
+            $t = trim((string) $item);
+            if ($t !== '') {
+                $msgs[] = $t;
+            }
+            if (count($msgs) >= $expectedCount) {
+                break;
+            }
+        }
+
+        return [
+            'messages'  => $msgs,
+            'reasoning' => trim((string) ($data['reasoning'] ?? '')),
+        ];
+    }
+
+    $lines = preg_split('/\r?\n+/', $raw) ?: [];
+    $msgs = [];
+    foreach ($lines as $line) {
+        $line = trim(preg_replace('/^\d+[\.\)]\s*/', '', trim($line)) ?? '');
+        if ($line !== '' && !str_starts_with($line, '{')) {
+            $msgs[] = $line;
+        }
+        if (count($msgs) >= $expectedCount) {
+            break;
+        }
+    }
+
+    return ['messages' => $msgs, 'reasoning' => ''];
 }
 
 /** @return array<string, array{in:int,ok:int,err:int}> */
